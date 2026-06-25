@@ -83,6 +83,8 @@ jobs:
               apt-get update
               apt-get install -y --no-install-recommends git unzip zip curl libzip-dev libonig-dev
               docker-php-ext-install zip mbstring >/dev/null
+              git config --global --add safe.directory /app
+              git config --global --add safe.directory /app/build/surreal-graph-sync
               curl -fsSL -o /usr/bin/composer https://getcomposer.org/download/latest-stable/composer.phar
               chmod +x /usr/bin/composer
               curl -fsSL -o /usr/local/bin/php-scoper \
