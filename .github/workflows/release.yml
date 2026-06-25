@@ -1,0 +1,87 @@
+name: Build & Release Plugin
+
+# Builds a production, namespace-scoped plugin zip (dev files excluded) and
+# publishes it as a GitHub release when the version in the plugin header is
+# above the latest existing release. Triggered manually from the Actions tab.
+on:
+  workflow_dispatch:
+
+# Required so the workflow can create releases and upload assets.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version from plugin header
+        id: version
+        run: |
+          VERSION=$(grep -iE '^\s*\*?\s*Version:' surreal-graph-sync.php \
+            | head -1 \
+            | sed -E 's/.*Version:[[:space:]]*//I' \
+            | tr -d '[:space:]\r')
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not parse Version from plugin header"
+            exit 1
+          fi
+          echo "Header version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Get latest release version
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Strip a leading "v" from the latest release tag; empty if none exist.
+          LATEST=$(gh release view --json tagName --jq '.tagName' 2>/dev/null \
+            | sed -E 's/^v//' || true)
+          echo "Latest release version: ${LATEST:-<none>}"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+
+      - name: Check version was bumped
+        id: check
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          LATEST="${{ steps.latest.outputs.latest }}"
+          if [ -z "$LATEST" ]; then
+            echo "No previous release; proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          elif dpkg --compare-versions "$VERSION" gt "$LATEST"; then
+            echo "Header version $VERSION > latest release $LATEST; proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Header version $VERSION is not greater than latest release $LATEST; skipping release."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build production plugin zip
+        if: steps.check.outputs.proceed == 'true'
+        run: bash bin/build.sh
+
+      - name: Rename asset with version
+        if: steps.check.outputs.proceed == 'true'
+        id: asset
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ASSET="surreal-graph-sync-v${VERSION}.zip"
+          mv build/surreal-graph-sync.zip "build/${ASSET}"
+          echo "asset=build/${ASSET}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        if: steps.check.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          gh release create "v${VERSION}" "${{ steps.asset.outputs.asset }}" \
+            --title "v${VERSION}" \
+            --target "${{ github.sha }}" \
+            --generate-notes
