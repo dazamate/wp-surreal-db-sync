@@ -61,9 +61,15 @@ echo "==> Packaging ${BUILD_DIR}/${SLUG}.zip"
 ( cd "${BUILD_DIR}" && zip -qr "${SLUG}.zip" "${SLUG}" )
 
 # Restore the full dev dependency set for the local working tree, since the
-# build step replaced vendor/ with a production-only install.
-echo "==> Restoring dev dependencies in the working tree"
-composer install --no-interaction >/dev/null
+# build step replaced vendor/ with a production-only install. Skipped in CI
+# (SKIP_DEV_RESTORE=1), where the working tree is throwaway and we don't want
+# to pull dev dependencies after a production build.
+if [ "${SKIP_DEV_RESTORE:-0}" = "1" ]; then
+    echo "==> Skipping dev dependency restore (SKIP_DEV_RESTORE=1)"
+else
+    echo "==> Restoring dev dependencies in the working tree"
+    composer install --no-interaction >/dev/null
+fi
 
 echo ""
 echo "Done. Installable plugin: ${BUILD_DIR}/${SLUG}.zip"

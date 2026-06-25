@@ -64,16 +64,34 @@ jobs:
 
       - name: Build production plugin zip
         if: steps.check.outputs.proceed == 'true'
-        run: bash bin/build.sh
-
-      - name: Rename asset with version
-        if: steps.check.outputs.proceed == 'true'
         id: asset
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          ASSET="surreal-graph-sync-v${VERSION}.zip"
-          mv build/surreal-graph-sync.zip "build/${ASSET}"
-          echo "asset=build/${ASSET}" >> "$GITHUB_OUTPUT"
+          # Build inside a clean public PHP 8.5 image — no docker compose, so the
+          # surrealdb test service is never started. bin/build.sh detects it is
+          # already in a container (/.dockerenv) and runs the build directly.
+          # The zip is renamed inside the container (root) to dodge host-side
+          # permission issues on the root-owned build/ output.
+          docker run --rm \
+            -v "$PWD":/app -w /app \
+            -e VERSION \
+            -e SKIP_DEV_RESTORE=1 \
+            -e COMPOSER_HOME=/tmp/composer \
+            php:8.5-cli bash -c '
+              set -euo pipefail
+              apt-get update
+              apt-get install -y --no-install-recommends git unzip zip curl libzip-dev libonig-dev
+              docker-php-ext-install zip mbstring >/dev/null
+              curl -fsSL -o /usr/bin/composer https://getcomposer.org/download/latest-stable/composer.phar
+              chmod +x /usr/bin/composer
+              curl -fsSL -o /usr/local/bin/php-scoper \
+                https://github.com/humbug/php-scoper/releases/latest/download/php-scoper.phar
+              chmod +x /usr/local/bin/php-scoper
+              bash bin/build.sh
+              mv build/surreal-graph-sync.zip "build/surreal-graph-sync-v${VERSION}.zip"
+            '
+          echo "asset=build/surreal-graph-sync-v${VERSION}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         if: steps.check.outputs.proceed == 'true'
