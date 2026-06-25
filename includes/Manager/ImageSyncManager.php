@@ -11,7 +11,9 @@ use Dazamate\SurrealGraphSync\Utils\SurrealUtils;
 
 class ImageSyncManager {
     public static function load_hooks() {
-        add_action('add_attachment', [__CLASS__, 'on_attatchemnt_change']);
+        add_filter('wp_generate_attachment_metadata', [__CLASS__, 'on_metadata_generated'], 20, 2);
+        
+        // Subsequent edits (alt text, caption, title) still need to re-sync.
         add_action('edit_attachment', [__CLASS__, 'on_attatchemnt_change']);
         add_action('delete_attachment', [__CLASS__, 'on_attatchemnt_delete']);
 
@@ -52,6 +54,12 @@ class ImageSyncManager {
         ];
     
         return $form_fields;
+    }
+
+    public static function on_metadata_generated(array $metadata, int $post_id): array {
+        self::on_attatchemnt_change($post_id);
+
+        return $metadata;
     }
 
     public static function on_attatchemnt_change(int $post_id) {

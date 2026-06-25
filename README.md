@@ -155,8 +155,8 @@ Image attachments are mapped through their own filter, in the same way as post t
 unlike a custom post type you **don't register a table for them**: any attachment with an
 `image/*` mime type is automatically synced to the `image` table. The `MappedData` you
 receive is already pre-seeded with the generic image fields — `title`, `post_id`, `mime`,
-`src` (the attachment URL), `alt`, `caption`, and `description` — so this filter is only for
-adding or overriding fields:
+`src` (the full-size URL), `width`, `height`, `alt`, `caption`, `description`, and `sizes`
+(see below) — so this filter is only for adding or overriding fields:
 
 ```php
 apply_filters('surreal_graph_map_image', MappedData $mapped_data, int $post_id): MappedData;
@@ -167,14 +167,34 @@ use Dazamate\SurrealGraphSync\Data\MappedData;
 use Dazamate\SurrealGraphSync\Field\StringField;
 
 add_filter('surreal_graph_map_image', function (MappedData $mapped_data, int $post_id): MappedData {
-    // The generic fields (title, post_id, mime, src, alt, caption, description) are
-    // already set — add your own, e.g. a photographer credit stored in post meta.
+    // The generic fields (title, post_id, mime, src, width, height, alt, caption,
+    // description, sizes) are already set — add your own, e.g. a photographer credit
+    // stored in post meta.
     return $mapped_data->set(
         'credit',
         new StringField(get_post_meta($post_id, 'photographer_credit', true) ?: '')
     );
 }, 10, 2);
 ```
+
+### Image sizes
+
+The pre-seeded `sizes` field is an `array<object>` holding every registered intermediate
+image size plus `full` — one object per distinct rendition WordPress has generated. Each
+entry carries its `name`, `url`, `width`, `height`, and `mime`:
+
+```
+sizes: [
+    { name: 'thumbnail', url: 'https://…-150x150.jpg', width: 150,  height: 150,  mime: 'image/jpeg' },
+    { name: 'medium',    url: 'https://…-300x200.jpg', width: 300,  height: 200,  mime: 'image/jpeg' },
+    { name: 'full',      url: 'https://….jpg',         width: 1920, height: 1280, mime: 'image/jpeg' },
+]
+```
+
+The top-level `src`, `width`, and `height` always describe the full-size image. URLs come
+from `wp_get_attachment_image_src`, so they reflect any CDN/optimised plugins. Renditions that resolve to the same URL (WordPress returns the full image for
+any requested size larger than the original) are de-duplicated, so each rendition appears at
+most once.
 
 
 ## User mapping
