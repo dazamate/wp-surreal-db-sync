@@ -3,6 +3,7 @@
 namespace Dazamate\SurrealGraphSync\Manager;
 
 use Dazamate\SurrealGraphSync\Mapper\Entity\PostMapper;
+use Dazamate\SurrealGraphSync\Data\MappedData;
 use Dazamate\SurrealGraphSync\Utils\ErrorManager;
 use Dazamate\SurrealGraphSync\PostType\ImagePostType;
 use Dazamate\SurrealGraphSync\Enum\MetaKeys;
@@ -36,14 +37,18 @@ class PostSyncManager {
 
         if (in_array($post->post_status, $ignore_post_states)) return;
 
-        // Map the post type to a surreal table name (entity)
-        $surreal_table_name = apply_filters('surreal_map_table_name', '', $post->post_type, $post_id);
+        // Map the post type to a surreal table name (entity). An empty result
+        // means this post type isn't opted in (no `surreal_map_post_table_name`
+        // mapping registered for it), so there's nothing to sync. Bail before
+        // seeding/firing so unmapped post types from other plugins stay silent
+        // rather than raising a "no mapped table name" admin notice.
+        $surreal_table_name = apply_filters('surreal_map_post_table_name', '', $post->post_type, $post_id);
+
+        if (empty($surreal_table_name)) return;
 
         // Allways map the generic post data, downstream filters can add/remove generic data
-        $mapped_entity_data = PostMapper::map([], $post_id);
+        $mapped_entity_data = PostMapper::map(new MappedData(), $post_id);
         $mapped_entity_data = apply_filters('surreal_graph_map_' . $post->post_type, $mapped_entity_data, $post_id);
-
-        //echo '<pre>'; var_dump($related_data_mappings); exit;
 
         do_action('surreal_sync_post', $post, $surreal_table_name, $mapped_entity_data);
     }

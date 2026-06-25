@@ -1,0 +1,36 @@
+services:
+  php:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: wp-surreal-db-sync-php:8.5
+    working_dir: /app
+    volumes:
+      - .:/app
+      - composer-cache:/root/.composer/cache
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    environment:
+      # Consumed by tests/Integration/IntegrationTestCase.php
+      SURREAL_TEST_ADDR: http://surrealdb:8000
+      SURREAL_TEST_USER: root
+      SURREAL_TEST_PASS: root
+      SURREAL_TEST_NS: test
+      SURREAL_TEST_DB: test
+
+  # Ephemeral, in-memory SurrealDB used only by the test suite. All data is
+  # wiped when the container stops. Pinned for reproducible test runs.
+  surrealdb:
+    image: surrealdb/surrealdb:v2.3.7
+    command: start --user root --pass root memory
+    healthcheck:
+      # The image is FROM scratch (no shell), so use the binary in exec form.
+      test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 2s
+
+volumes:
+  composer-cache:

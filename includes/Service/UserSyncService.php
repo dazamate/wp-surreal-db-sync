@@ -2,37 +2,32 @@
 
 namespace Dazamate\SurrealGraphSync\Service;
 
-use Dazamate\SurrealGraphSync\Validate\MappingDataValidator;
-use Dazamate\SurrealGraphSync\Validate\RelatedMappingDataValidator;
+use Dazamate\SurrealGraphSync\Data\MappedData;
+use Dazamate\SurrealGraphSync\Dto\Reference\WordPressId;
 use Dazamate\SurrealGraphSync\Utils\UserErrorManager;
-use Dazamate\SurrealGraphSync\Utils\Inputs;
-use Dazamate\SurrealGraphSync\Query\QueryBuilder;
 use Dazamate\SurrealGraphSync\Enum\QueryType;
 use Dazamate\SurrealGraphSync\Enum\MetaKeys;
 
 class UserSyncService extends SyncService {
-    /**
-     * Attach all hooks required for user sync.
-     */
     public static function load_hooks() {
         add_action('surreal_sync_user', [__CLASS__, 'sync_user'], 10, 4);
-    }    
+    }
 
-    public static function sync_user(\WP_User $user, string $mapped_table_name, array $mapped_user_data, array $mapped_related_data) {       
+    public static function sync_user(\WP_User $user, string $mapped_table_name, MappedData $mapped_user_data, array $mapped_related_data) {
         UserErrorManager::clear($user->ID);
 
         if (empty($mapped_table_name)) {
-            UserErrorManager::add($user->ID, ['No mapped user table name found - you must use the "surreal_map_table_name" filter to map a post type to a Surreal DB table name']);
+            UserErrorManager::add($user->ID, ['No mapped user table name found - you must use the "surreal_graph_user_role_map" filter to map a user role to a Surreal DB table name']);
             return;
         }
 
         // No mapping done for this type
-        if (empty($mapped_user_data)) {
+        if ($mapped_user_data->is_empty()) {
             return;
         }
 
         $errors = [];
-        
+
         self::validate($mapped_user_data, QueryType::USER, $errors);
 
         if (!empty($errors)) {
@@ -44,43 +39,27 @@ class UserSyncService extends SyncService {
 
         if (!empty($errors)) {
             UserErrorManager::add($user->ID, $errors);
-            return false;
-        }
-
-        // Build the entire CONTENT clause to set/update all the fields
-        // Note, SET can be used if you want to append data, not override all 
-        $content_obj = QueryBuilder::build_object_str($mapped_user_data);
-        $where_clause = 'user_id = ' . $user->ID;
-
-        $q = "UPSERT {$mapped_table_name} CONTENT {$content_obj} WHERE {$where_clause} RETURN id;";        
-
-        try {
-            $res = $db->query($q);
-        } catch (\Throwable $e) {
-            UserErrorManager::add($user->ID, [sprintf("Surreal query error: %s", $e->getMessage())]);
             return;
         }
-        
-        $surreal_id = self::try_get_record_id_from_response($res);
 
-        if (empty($surreal_id)) {
-            UserErrorManager::add($user->ID, ['Surreal sync error: Did not get a record ID from surreal']);
-            return;
-        }
-        
-        update_user_meta($user->ID, MetaKeys::SURREAL_DB_RECORD_ID_META_KEY->value, $surreal_id);
+        // Upsert the user record and all of its edges atomically — either
+        // everything commits or nothing does. A relation may reference this user
+        // by its WP id even on a first save (resolved to the in-transaction
+        // record via the `$rec` variable).
+        $surreal_id = self::persist_entity(
+            $db,
+            $mapped_table_name,
+            $mapped_user_data,
+            $mapped_related_data,
+            new WordPressId($user->ID, QueryType::USER),
+            $errors
+        );
 
-        // Only validate after we save the user and get a surreal id
-        self::validate_relation_mapping($mapped_related_data, QueryType::USER, $errors);
-        
-
-        if (!empty($errors)) {
+        if ($surreal_id === null) {
             UserErrorManager::add($user->ID, $errors);
-            wp_redirect(admin_url('user-edit.php?user_id=' . $user->ID)); exit;
+            return;
         }
- 
-        foreach($mapped_related_data as $mapping) {
-            self::do_relation_upsert_query($mapping, $db);
-        }
+
+        update_user_meta($user->ID, MetaKeys::SURREAL_DB_RECORD_ID_META_KEY->value, $surreal_id);
     }
 }

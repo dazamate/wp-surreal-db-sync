@@ -8,6 +8,7 @@
         <testsuite name="WP Surreal Sync Test Suite">
             <directory suffix=".php">tests</directory>
             <exclude>tests/bootstrap.php</exclude>
+            <exclude>tests/Integration/IntegrationTestCase.php</exclude>
         </testsuite>
     </testsuites>
 </phpunit>

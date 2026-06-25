@@ -7,9 +7,8 @@ use Dazamate\SurrealGraphSync\Enum\MigrationDirection;
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 class MigrationsPage {
-    static public function load_hooks() {
-        add_action( 'admin_menu', [__CLASS__, 'surreal_sync_add_menu_item'] );
-    }
+    // NB: this page's admin menu item is registered by AdminSettings::surreal_sync_add_menu_item();
+    // there's no load_hooks() here.
 
     static private function get_previous_migrations(array $group_names): array {
         $db = apply_filters('get_surreal_db_conn', null);
@@ -43,10 +42,8 @@ class MigrationsPage {
             return;
         }
 
-        /**
-         * Should contain an orderd array with the migration name as the key, and array with an up and down key, each containing 
-         * an ordered array of migrations to perform
-         */
+        // Ordered array keyed by migration name; each value has up/down keys holding an
+        // ordered list of migrations to perform.
         $migrations = [];
         $migrations = apply_filters('get_surreal_graph_migrations', $migrations);
 
@@ -170,62 +167,62 @@ class MigrationsPage {
             );
         }
 
-        // If a migration_up or migration_down was triggered, run it
+        // If a single migration_up or migration_down was triggered, run it. The
+        // POST value is the migration *name*; migrations are consumed as data via
+        // the `get_surreal_graph_migrations` filter, so there's no class to load.
         if ( isset( $_POST['migration_up'] ) || isset( $_POST['migration_down'] ) ) {
-            $migration_class = isset( $_POST['migration_up'] ) 
-                ? sanitize_text_field( $_POST['migration_up'] )
-                : sanitize_text_field( $_POST['migration_down'] );
+            $direction = isset( $_POST['migration_up'] )
+                ? MigrationDirection::UP
+                : MigrationDirection::DOWN;
 
-            // Double-check the class implements the interface
-            if ( ! class_exists( $migration_class ) ) {
-                add_settings_error( 'migration', 'migration_not_found', "Migration class $migration_class not found.", 'error' );
+            $migration_name = sanitize_text_field(
+                $_POST['migration_up'] ?? $_POST['migration_down']
+            );
+
+            $queries = self::get_migration_queries( $migration_name, $direction );
+
+            if ( empty( $queries ) ) {
+                add_settings_error(
+                    'migration',
+                    'migration_not_found',
+                    sprintf( "No '%s' queries found for migration: %s.", $direction->value, $migration_name ),
+                    'error'
+                );
                 return;
             }
 
-            if ( ! in_array( IMigration::class, class_implements( $migration_class ) ?: [] ) ) {
-                add_settings_error( 'migration', 'not_a_migration', "Class $migration_class does not implement IMigration.", 'error' );
-                return;
-            }
-
-            // Instantiate your Surreal DB class (adjust to your needs)
-            $db = SurrealDB::get_instance(); // Example of retrieving your Surreal DB instance
-
-            // Run the appropriate migration
-            if ( isset( $_POST['migration_up'] ) ) {
-                $success = $migration_class::up( $db );
-                if ( $success ) {
-                    add_settings_error( 'migration', 'migration_up_success', "Successfully migrated up: $migration_class", 'updated' );
-                } else {
-                    add_settings_error( 'migration', 'migration_up_failure', "Migration up failed: $migration_class", 'error' );
-                }
-            } else {
-                $success = $migration_class::down( $db );
-                if ( $success ) {
-                    add_settings_error( 'migration', 'migration_down_success', "Successfully migrated down: $migration_class", 'updated' );
-                } else {
-                    add_settings_error( 'migration', 'migration_down_failure', "Migration down failed: $migration_class", 'error' );
-                }
-            }
+            self::run_queries( $queries );
         }
     }
 
-    protected static function handle_group_migration(string $group_name, MigrationDirection $direction) {
+    protected static function handle_group_migration(string $group_name, MigrationDirection $direction): void {
+        self::run_queries(self::get_all_migration_queries_of_group($group_name, $direction));
+    }
+
+    // Execute an ordered list of SurrealQL strings and render the output. Shared by the
+    // per-migration and per-group ("Migrate All") handlers.
+    protected static function run_queries(array $queries): void {
         $db = apply_filters('get_surreal_db_conn', null);
 
-        $queries = self::get_all_migration_queries_of_group($group_name, $direction);
+        if ( ! ( $db instanceof \Surreal\Surreal ) ) {
+            add_settings_error('migration', 'no_db_conn', 'Unable to get a Surreal DB connection to run the migration.', 'error');
+            return;
+        }
+
+        $q = '';
         ob_start();
         try {
             foreach($queries as $q): if (empty($q)) continue; ?>
                 <?php $result = $db->query($q); ?>
                 <pre style="white-space: pre-line;"><?php echo htmlentities($q); ?></pre>
-                <pre style="white-space: no-wrap; background-color: #393939; color:white; padding: 20px;"><?php htmlentities(var_dump($result) ?? ''); ?></pre>
+                <pre style="white-space: no-wrap; background-color: #393939; color:white; padding: 20px;"><?php echo htmlentities(print_r($result, true)); ?></pre>
             <?php endforeach;
         } catch (\Throwable $e) { ?>
             <pre style="white-space: pre-line;"><?php echo htmlentities($q); ?></pre>
             <pre style="white-space: pre-line; background-color:red; color:white;"><?php echo htmlentities($e->getMessage()); ?></pre>
-        <?php } finally {
-            $db->close();
-        }
+        <?php }
+        // NB: don't $db->close() here — it's the shared singleton connection used
+        // for the rest of the request.
 
         $result_html = ob_get_clean(); ?>
         <h2>Migration Output</h2>
@@ -237,6 +234,21 @@ class MigrationsPage {
             background: #fffbe1;">
             <?php echo $result_html; ?></div>
         <?php
+    }
+
+    // Resolve the ordered query list for a single migration (by name) in the given
+    // direction. Searches every group since migration names are unique system-wide.
+    protected static function get_migration_queries(string $migration_name, MigrationDirection $direction): array {
+        $migrations = apply_filters('get_surreal_graph_migrations', []);
+        self::sort_migrations($migrations);
+
+        foreach ($migrations as $migration_group) {
+            if ( ! isset($migration_group[$migration_name]) ) continue;
+
+            return $migration_group[$migration_name][$direction->value] ?? [];
+        }
+
+        return [];
     }
 
     protected static function get_all_migration_queries_of_group(string $group_name, MigrationDirection $direction): array {

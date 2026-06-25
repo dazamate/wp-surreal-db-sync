@@ -6,6 +6,16 @@ use PHPUnit\Framework\TestCase;
 use Brain\Monkey;
 use Brain\Monkey\Functions;
 use Dazamate\SurrealGraphSync\Query\QueryBuilder;
+use Dazamate\SurrealGraphSync\Data\MappedData;
+use Dazamate\SurrealGraphSync\Field\StringField;
+use Dazamate\SurrealGraphSync\Field\NumberField;
+use Dazamate\SurrealGraphSync\Field\DateTimeField;
+use Dazamate\SurrealGraphSync\Field\RecordField;
+use Dazamate\SurrealGraphSync\Field\ArrayField;
+use Dazamate\SurrealGraphSync\Field\ObjectField;
+use Dazamate\SurrealGraphSync\Dto\Reference\SurrealId;
+use Dazamate\SurrealGraphSync\Dto\Reference\WordPressId;
+use Dazamate\SurrealGraphSync\Enum\QueryType;
 
 class QueryBuilderTests extends TestCase
 {
@@ -13,8 +23,8 @@ class QueryBuilderTests extends TestCase
     {
         parent::setUp();
         Monkey\setUp();
-        
-        Functions\when('get_post_meta')->alias(function ($post_id, $key = '', $single = false) {        
+
+        Functions\when('get_post_meta')->alias(function ($post_id, $key = '', $single = false) {
             return match($post_id) {
                 42 => "image:abfsdfd897sdf9",
                 default => null
@@ -28,234 +38,165 @@ class QueryBuilderTests extends TestCase
         parent::tearDown();
     }
 
-    public function testShouldReturnTheAnswer()
+    private function mapped(array $fields): MappedData
     {
-        $result = QueryBuilder::build_object_str([]);
-        $this->assertEquals($result, '{}');
+        $data = new MappedData();
+
+        foreach ($fields as $key => $field) {
+            $data->set($key, $field);
+        }
+
+        return $data;
+    }
+
+    public function testShouldRenderEmptyObject()
+    {
+        $this->assertSame('{}', QueryBuilder::build_object_str(new MappedData()));
     }
 
     public function testShouldBuildObjectWithSimpleStringProperty()
     {
-        $data = [
-            'title' => [
-                'type'  => 'string',
-                'value' => 'Hello World',
-            ]
-        ];
-        
-        $expected = "{title: <string>'Hello World'}";
-        
-        $this->assertSame($expected, QueryBuilder::build_object_str($data));
+        $data = $this->mapped([
+            'title' => new StringField('Hello World'),
+        ]);
+
+        $this->assertSame("{title: <string>'Hello World'}", QueryBuilder::build_object_str($data));
     }
 
     public function testShouldBuildObjectWithSimpleNumberProperty()
     {
-        $data = [
-            'post_id' => [
-                'type'  => 'number',
-                'value' => 42,
-            ]
-        ];
+        $data = $this->mapped([
+            'post_id' => new NumberField(42),
+        ]);
 
-        $expected = "{post_id: <number>42}";
-        
-        $this->assertSame($expected, QueryBuilder::build_object_str($data));
+        $this->assertSame("{post_id: <number>42}", QueryBuilder::build_object_str($data));
+    }
+
+    public function testShouldBuildObjectWithFloatNumberProperty()
+    {
+        $data = $this->mapped([
+            'discount' => new NumberField(0.2),
+        ]);
+
+        $this->assertSame("{discount: <number>0.2}", QueryBuilder::build_object_str($data));
     }
 
     public function testShouldBuildObjectWithDatetimeProperty()
     {
-        $data = [
-            'created_at' => [
-                'type'  => 'datetime',
-                'value' => '2025-01-26T12:34:56Z',
-            ]
-        ];
-        
-        $expected = "{created_at: <datetime>'2025-01-26T12:34:56Z'}";
-        
-        $this->assertSame($expected, QueryBuilder::build_object_str($data));
-    }
+        $data = $this->mapped([
+            'created_at' => new DateTimeField('2025-01-26T12:34:56Z'),
+        ]);
 
+        $this->assertSame("{created_at: <datetime>'2025-01-26T12:34:56Z'}", QueryBuilder::build_object_str($data));
+    }
 
     public function testShouldBuildObjectWithDatetimeStr()
     {
-        $data = [
-            'created_at' => [
-                'type'  => 'datetime',
-                'value' => '476244630',
-            ]
-        ];
-        
-        $expected = "{created_at: <datetime>'1985-02-03T02:10:30+00:00'}";
-        
-        $this->assertSame($expected, QueryBuilder::build_object_str($data));
+        $data = $this->mapped([
+            'created_at' => new DateTimeField('476244630'),
+        ]);
+
+        $this->assertSame("{created_at: <datetime>'1985-02-03T02:10:30+00:00'}", QueryBuilder::build_object_str($data));
     }
 
     public function testShouldBuildObjectWithDatetimeInt()
     {
-        $data = [
-            'created_at' => [
-                'type'  => 'datetime',
-                'value' => 476244630,
-            ]
-        ];
-        
-        $expected = "{created_at: <datetime>'1985-02-03T02:10:30+00:00'}";
-        
-        $this->assertSame($expected, QueryBuilder::build_object_str($data));
+        $data = $this->mapped([
+            'created_at' => new DateTimeField(476244630),
+        ]);
+
+        $this->assertSame("{created_at: <datetime>'1985-02-03T02:10:30+00:00'}", QueryBuilder::build_object_str($data));
     }
 
     public function testShouldExtractSurrealRecordIDFromPostID()
     {
-        $data = [
-            'image' => [
-                'type'  => 'record<image>',
-                'value' => 42,
-            ]
-        ];
+        $data = $this->mapped([
+            'image' => new RecordField(new WordPressId(42, QueryType::POST)),
+        ]);
 
         $result = QueryBuilder::build_object_str($data);
 
-        $this->assertStringContainsString('image: <record<image>>image:abfsdfd897sdf9', $result, 'Should contain the image surreal record id');        
+        $this->assertStringContainsString('image: <record<image>>image:abfsdfd897sdf9', $result, 'Should contain the image surreal record id');
     }
-
 
     public function testShouldUseSurrealRecordIDIfPassedDirectly()
     {
-        $data = [
-            'image' => [
-                'type'  => 'record<image>',
-                'value' => 'image:abfsdfd897sdf9',
-            ]
-        ];
+        $data = $this->mapped([
+            'image' => new RecordField(new SurrealId('image:abfsdfd897sdf9')),
+        ]);
 
         $result = QueryBuilder::build_object_str($data);
 
-        $this->assertStringContainsString('image: <record<image>>image:abfsdfd897sdf9', $result, 'Should contain the image surreal record id');        
+        $this->assertStringContainsString('image: <record<image>>image:abfsdfd897sdf9', $result, 'Should contain the image surreal record id');
     }
-
 
     public function testShouldBuildQueryWithNULLValueIfRecordIdNoExist()
     {
-        $data = [
-            'image' => [
-                'type'  => 'record<image>',
-                'value' => 22,
-            ]
-        ];
+        $data = $this->mapped([
+            'image' => new RecordField(new WordPressId(22, QueryType::POST)),
+        ]);
 
         $result = QueryBuilder::build_object_str($data);
 
-        $this->assertStringContainsString('image: NULL', $result, 'Should contain NULL as the record');        
+        $this->assertStringContainsString('image: NULL', $result, 'Should contain NULL as the record');
     }
 
     public function testShouldBuildObjectWithArrayOfStrings()
-    {       
-        $data = [
-            'categories' => [
-                'type'  => 'array<string>',
-                'value' => ['Breakfast', 'Quick & Easy'],
-            ],
-        ];
-        
-        // We expect something like: {categories: <array<string>>['Breakfast', 'Quick & Easy']}
+    {
+        $data = $this->mapped([
+            'categories' => new ArrayField(['Breakfast', 'Quick & Easy'], 'array<string>'),
+        ]);
+
         $expected = "{categories: <array<string>>['Breakfast', 'Quick & Easy']}";
-        
+
         $this->assertSame($expected, QueryBuilder::build_object_str($data));
     }
 
     public function testShouldHandleEmptyArrayValue()
     {
-        // If 'value' is an empty array for an array type, it should produce NULL
-        $data = [
-            'empty_list' => [
-                'type'  => 'array',
-                'value' => [],
-            ],
-        ];
+        $data = $this->mapped([
+            'empty_list' => new ArrayField([], 'array'),
+        ]);
 
-        // => {empty_list: <array>[]}
-        $expected = "{empty_list: NULL}";
-        
-        $this->assertSame($expected, QueryBuilder::build_object_str($data));
+        $this->assertSame("{empty_list: NULL}", QueryBuilder::build_object_str($data));
     }
 
     public function testShouldBuildObjectWithNestedObject()
     {
-        $data = [
-            'recipe_yield' => [
-                'type' => 'object',
-                'value' => [
-                    'amount' => [
-                        'type'  => 'number',
-                        'value' => 4,
-                    ],
-                    'measure_unit' => [
-                        'type'  => 'string',
-                        'value' => 'servings',
-                    ]
-                ]
-            ]
-        ];
-        
-        // => {recipe_yield: <object>{amount: <number>4, measure_unit: <string>'servings'}}
+        $data = $this->mapped([
+            'recipe_yield' => new ObjectField($this->mapped([
+                'amount'       => new NumberField(4),
+                'measure_unit' => new StringField('servings'),
+            ])),
+        ]);
+
         $expected = "{recipe_yield: <object>{amount: <number>4, measure_unit: <string>'servings'}}";
-        
+
         $this->assertSame($expected, QueryBuilder::build_object_str($data));
     }
 
     public function testShouldBuildObjectWithNestedArraysOfObjects()
     {
-        // Example akin to method_steps or nutrition fields in your mapper:
-        $data = [
-            'method_steps' => [
-                'type'  => 'array',  // or 'array<object>'
-                'value' => [
-                    [
-                        'type' => 'object',
-                        'value' => [
-                            'name' => [
-                                'type' => 'string',
-                                'value' => 'Step 1'
-                            ],
-                            'description' => [
-                                'type' => 'string',
-                                'value' => 'Do something...'
-                            ],
-                            'step_image' => [
-                                'type' => 'record<image>',
-                                'value' => 999
-                            ]
-                        ]
-                    ],
-                    [
-                        'type' => 'object',
-                        'value' => [
-                            'name' => [
-                                'type' => 'string',
-                                'value' => 'Step 2'
-                            ],
-                            'description' => [
-                                'type' => 'string',
-                                'value' => 'Do something else...'
-                            ],
-                            'step_image' => [
-                                'type' => 'record<image>',
-                                'value' => ''
-                            ]
-                        ]
-                    ],
-                ],
-            ],
-        ];
-                
+        $data = $this->mapped([
+            'method_steps' => new ArrayField([
+                new ObjectField($this->mapped([
+                    'name'        => new StringField('Step 1'),
+                    'description' => new StringField('Do something...'),
+                    'step_image'  => new RecordField(new WordPressId(999, QueryType::POST)),
+                ])),
+                new ObjectField($this->mapped([
+                    'name'        => new StringField('Step 2'),
+                    'description' => new StringField('Do something else...'),
+                    'step_image'  => new RecordField(new SurrealId('')),
+                ])),
+            ], 'array'),
+        ]);
+
         $result = QueryBuilder::build_object_str($data);
 
-        // Basic structural checks:
         $this->assertStringStartsWith('{method_steps: <array>[', $result);
         $this->assertStringEndsWith(']}', $result);
 
-        // Check partial contents:
         $this->assertStringContainsString("name: <string>'Step 1'", $result);
         $this->assertStringContainsString("description: <string>'Do something...'", $result);
         $this->assertStringContainsString("name: <string>'Step 2'", $result);
@@ -264,21 +205,11 @@ class QueryBuilderTests extends TestCase
 
     public function testShouldHandleNullValues()
     {
-        // If 'value' is an empty string for a 'string' type, or null, we want to see "NULL"
-        $data = [
-            'someField' => [
-                'type'  => 'string',
-                'value' => '',
-            ],
-            'someOtherField' => [
-                'type' => 'number',
-                'value' => null,
-            ]
-        ];
+        $data = $this->mapped([
+            'someField'      => new StringField(''),
+            'someOtherField' => new NumberField(null),
+        ]);
 
-        // => {someField: NULL, someOtherField: NULL}
-        $expected = "{someField: NULL, someOtherField: NULL}";
-        
-        $this->assertSame($expected, QueryBuilder::build_object_str($data));
+        $this->assertSame("{someField: NULL, someOtherField: NULL}", QueryBuilder::build_object_str($data));
     }
 }

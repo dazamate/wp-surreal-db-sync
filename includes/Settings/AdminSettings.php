@@ -12,8 +12,20 @@ class AdminSettings {
         add_action( 'admin_menu', [__CLASS__, 'surreal_sync_add_menu_item'] );
     }
 
+    const PROTOCOLS = ['http', 'https', 'ws', 'wss'];
+
+    const DEFAULTS = [
+        'db_protocol'  => 'http',
+        'db_address'   => '',
+        'db_port'      => '',
+        'db_username'  => '',
+        'db_password'  => '',
+        'db_namespace' => '',
+        'db_name'      => '',
+    ];
+
     static public function get_settings(): array {
-        return get_option( self::$options_key ) ?: [];
+        return wp_parse_args( get_option( self::$options_key ) ?: [], self::DEFAULTS );
     }
 
     static public function surreal_sync_add_menu_item() {
@@ -52,24 +64,13 @@ class AdminSettings {
         // Must have proper capability
         if ( ! current_user_can( 'manage_options' ) ) return;
     
-        // Retrieve existing options from the database, if any
-        $surreal_sync_options = get_option( self::$options_key );
-    
-        // Defaults for each setting if it's not yet stored
-        $defaults = array(
-            'db_address'   => '',
-            'db_port'      => '',
-            'db_username'  => '',
-            'db_password'  => '',
-            'db_namespace' => '',
-            'db_name'  => '',
-        );
-    
-        // Merge stored options with defaults
-        $surreal_sync_options = wp_parse_args( $surreal_sync_options, $defaults );
+        // Retrieve existing options merged with defaults so every key is present.
+        $surreal_sync_options = self::get_settings();
     
         // If the form has been submitted, process and save the input
         if ( isset( $_POST['surreal_sync_submit'] ) && check_admin_referer( 'surreal_sync_settings_save', 'surreal_sync_nonce' ) ) {
+            $submitted_protocol = sanitize_text_field( $_POST['db_protocol'] ?? '' );
+            $surreal_sync_options['db_protocol']   = in_array( $submitted_protocol, self::PROTOCOLS, true ) ? $submitted_protocol : 'http';
             $surreal_sync_options['db_address']    = sanitize_text_field( $_POST['db_address'] );
             $surreal_sync_options['db_port']       = sanitize_text_field( $_POST['db_port'] );
             $surreal_sync_options['db_username']   = sanitize_text_field( $_POST['db_username'] );
@@ -97,17 +98,29 @@ class AdminSettings {
     
                 <table class="form-table" role="presentation">
                     <tr>
-                        <th scope="row"><label for="address">Address</label></th>
+                        <th scope="row"><label for="db_protocol">Protocol</label></th>
                         <td>
-                            <input type="text" 
-                                   id="db_address" 
+                            <select id="db_protocol" name="db_protocol">
+                                <?php foreach ( self::PROTOCOLS as $protocol ) : ?>
+                                    <option value="<?php echo esc_attr( $protocol ); ?>" <?php selected( $surreal_sync_options['db_protocol'], $protocol ); ?>>
+                                        <?php echo esc_html( $protocol ); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="db_address">Address</label></th>
+                        <td>
+                            <input type="text"
+                                   id="db_address"
                                    name="db_address" 
                                    value="<?php echo esc_attr( $surreal_sync_options['db_address'] ); ?>" 
                                    class="regular-text" />
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="port">Port</label></th>
+                        <th scope="row"><label for="db_port">Port</label></th>
                         <td>
                             <input type="text" 
                                    id="db_port" 
@@ -117,7 +130,7 @@ class AdminSettings {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="username">Username</label></th>
+                        <th scope="row"><label for="db_username">Username</label></th>
                         <td>
                             <input type="text" 
                                    id="db_username" 
@@ -127,7 +140,7 @@ class AdminSettings {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="password">Password</label></th>
+                        <th scope="row"><label for="db_password">Password</label></th>
                         <td>
                             <input type="password" 
                                    id="db_password" 
@@ -137,17 +150,17 @@ class AdminSettings {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="namespace">Namespace</label></th>
+                        <th scope="row"><label for="db_namespace">Namespace</label></th>
                         <td>
-                            <input type="text" 
-                                   id="db_amespace" 
+                            <input type="text"
+                                   id="db_namespace"
                                    name="db_namespace" 
                                    value="<?php echo esc_attr( $surreal_sync_options['db_namespace'] ); ?>" 
                                    class="regular-text" />
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="database">Database Name</label></th>
+                        <th scope="row"><label for="db_name">Database Name</label></th>
                         <td>
                             <input type="text" 
                                    id="db_name" 

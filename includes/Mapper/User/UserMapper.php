@@ -2,9 +2,13 @@
 
 namespace Dazamate\SurrealGraphSync\Mapper\User;
 
+use Dazamate\SurrealGraphSync\Data\MappedData;
+use Dazamate\SurrealGraphSync\Field\StringField;
+use Dazamate\SurrealGraphSync\Field\NumberField;
+
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-class UserMapper {    
+class UserMapper {
     public static function register() {
         add_filter('surreal_graph_map_user_user', [__CLASS__, 'map'], 10, 2);
         add_filter('surreal_graph_user_role_map', [__CLASS__, 'map_user_roles_to_surreal_type'], 10, 1);
@@ -18,27 +22,11 @@ class UserMapper {
         return $user_role_map;
     }
 
-    public static function map(array $mapped_data, \WP_User $user): array {
-        $mapped_data['username'] =  [
-            'type' => 'string',
-            'value' => $user->user_login
-        ];
-
-        $mapped_data['email'] =  [
-            'type' => 'string',
-            'value' => $user->user_email
-        ];
-
-        $mapped_data['display_name'] =  [
-            'type' => 'string',
-            'value' => $user->display_name
-        ];
-
-        $mapped_data['user_id'] =  [
-            'type' => 'number',
-            'value' => $user->ID
-        ];
-
-        return $mapped_data;
+    public static function map(MappedData $mapped_data, \WP_User $user): MappedData {
+        return $mapped_data
+            ->set('username', new StringField($user->user_login))
+            ->set('email', new StringField($user->user_email))
+            ->set('display_name', new StringField($user->display_name))
+            ->set('user_id', new NumberField($user->ID));
     }
 }

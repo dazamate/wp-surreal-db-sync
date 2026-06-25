@@ -2,8 +2,7 @@
 
 namespace Dazamate\SurrealGraphSync\Manager;
 
-use Dazamate\SurrealGraphSync\Validate\MappingDataValidator;
-use Dazamate\SurrealGraphSync\Validate\RelatedMappingDataValidator;
+use Dazamate\SurrealGraphSync\Data\MappedData;
 use Dazamate\SurrealGraphSync\Utils\UserErrorManager;
 use Dazamate\SurrealGraphSync\Utils\Inputs;
 use Dazamate\SurrealGraphSync\Enum\MetaKeys;
@@ -11,9 +10,6 @@ use Dazamate\SurrealGraphSync\Enum\MetaKeys;
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 class UserSyncManager {
-    /**
-     * Attach all hooks required for user sync.
-     */
     public static function load_hooks() {
         // Runs after a user is created (i.e., registration) in WP Admin or front end
         add_action( 'user_register', [ __CLASS__, 'on_user_create' ], 10, 2 );
@@ -49,9 +45,6 @@ class UserSyncManager {
         <?php
     }
 
-    /**
-     * Handle creating or updating a user record in SurrealDB.
-     */
     public static function on_user_save( int $user_id, ?\WP_User $old_user_data ) {
         // Avoid hooking into auto-saves or AJAX if needed
         if ( defined( 'DOING_AJAX' ) && DOING_AJAX ) {
@@ -71,7 +64,7 @@ class UserSyncManager {
         foreach ($user_role_map as $surreal_user_type => $wordpress_user_types) {
             // If the user has the role that is mapped to this surreal type, then process with mapping the user as this type
             if ( count( array_intersect( $user->roles, $wordpress_user_types ) ) > 0 ) {
-                $mapped_user_data = apply_filters('surreal_graph_map_user_' . $surreal_user_type, [], $user );
+                $mapped_user_data = apply_filters('surreal_graph_map_user_' . $surreal_user_type, new MappedData(), $user );
 
                 $related_data_mappings = apply_filters('surreal_graph_map_user_related', [], $surreal_user_type, $user);
 

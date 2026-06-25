@@ -16,6 +16,7 @@ class Inputs {
             return match($type) {
                 QueryType::POST => get_post_meta((int)$record_value, MetaKeys::SURREAL_DB_RECORD_ID_META_KEY->value, true) ?: NULL,
                 QueryType::USER => get_user_meta((int)$record_value, MetaKeys::SURREAL_DB_RECORD_ID_META_KEY->value, true) ?: NULL,
+                QueryType::TERM => get_term_meta((int)$record_value, MetaKeys::SURREAL_DB_RECORD_ID_META_KEY->value, true) ?: NULL,
                 default => NULL
             };
         }

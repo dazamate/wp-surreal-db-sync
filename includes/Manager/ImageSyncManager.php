@@ -3,6 +3,7 @@
 namespace Dazamate\SurrealGraphSync\Manager;
 
 use Dazamate\SurrealGraphSync\Mapper\Entity\PostMapper;
+use Dazamate\SurrealGraphSync\Data\MappedData;
 use Dazamate\SurrealGraphSync\Utils\ErrorManager;
 use Dazamate\SurrealGraphSync\PostType\ImagePostType;
 use Dazamate\SurrealGraphSync\Enum\MetaKeys;
@@ -17,7 +18,7 @@ class ImageSyncManager {
         add_filter('admin_post_thumbnail_html', [__CLASS__, 'render_surreal_id_info_in_image_ui'], 10, 2);
         add_filter('attachment_fields_to_edit', [__CLASS__, 'render_surreal_id_attatchment_edit'], 10, 2);
 
-        add_filter('surreal_map_table_name', [__CLASS__, 'map_surreal_table_name'], 10, 3);
+        add_filter('surreal_map_post_table_name', [__CLASS__, 'map_surreal_table_name'], 10, 3);
     }
 
     public static function render_surreal_id_info_in_image_ui($content, $post_id) {
@@ -55,10 +56,10 @@ class ImageSyncManager {
 
     public static function on_attatchemnt_change(int $post_id) {
         $post = get_post($post_id);
-        $surreal_table_name = apply_filters('surreal_map_table_name', 'image', $post->post_type, $post_id);
+        $surreal_table_name = apply_filters('surreal_map_post_table_name', 'image', $post->post_type, $post_id);
 
         if (strpos($post->post_mime_type, 'image/') === 0) {
-            $mapped_data = apply_filters('surreal_graph_map_image', [], $post_id);       
+            $mapped_data = apply_filters('surreal_graph_map_image', new MappedData(), $post_id);
             do_action('surreal_sync_post', $post, $surreal_table_name, $mapped_data);
         }
     }

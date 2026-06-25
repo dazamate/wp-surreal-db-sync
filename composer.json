@@ -5,15 +5,32 @@
             "Dazamate\\SurrealGraphSync\\": "includes/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Dazamate\\SurrealGraphSync\\Tests\\": "tests/"
+        }
+    },
     "classmap": [
         "includes/Migration"
     ],
     "require": {
-        "surrealdb/surrealdb.php": "dev-main"
+        "php": ">=8.5",
+        "surrealdb/surrealdb.php": "^1.0"
     },
     "require-dev": {
-        "phpunit/phpunit": "^11.5",
-        "brain/monkey": "^2.6",
-        "php-mock/php-mock": "^2.5"
+        "phpunit/phpunit": "^13.0",
+        "brain/monkey": "^2.7",
+        "php-mock/php-mock": "^2.6",
+        "phpstan/phpstan": "^2.0",
+        "szepeviktor/phpstan-wordpress": "^2.0"
+    },
+    "config": {
+        "platform": {
+            "php": "8.5.0"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=1G"
     }
 }

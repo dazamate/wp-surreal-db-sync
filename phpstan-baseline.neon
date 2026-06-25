@@ -1,0 +1,43 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Parameter \#1 \$data of method Surreal\\Surreal\:\:signin\(\) expects array\{namespace\: string\|null, database\: string\|null, scope\: string\|null, access\: string\|null\}, array\{user\: mixed, pass\: mixed\} given\.$#'
+			identifier: argument.type
+			count: 1
+			path: includes/SurrealDBConnection.php
+
+		-
+			message: '#^Parameter \#2 \$options of method Surreal\\Surreal\:\:connect\(\) expects array\{namespace\: string\|null, database\: string\|null, versionCheck\: bool\|null\}\|null, array\{namespace\: mixed, database\: mixed\} given\.$#'
+			identifier: argument.type
+			count: 1
+			path: includes/SurrealDBConnection.php
+
+		-
+			message: '#^Found usage of constant DOING_AJAX\. Use wp_doing_ajax\(\) instead\.$#'
+			identifier: phpstanWP.wpConstant.fetch
+			count: 1
+			path: includes/Manager/UserSyncManager.php
+
+		-
+			message: '#^Action callback returns bool but should not return anything\.$#'
+			identifier: return.void
+			count: 1
+			path: includes/Service/SyncService.php
+
+		-
+			message: '#^Call to static method get_info\(\) on an unknown class Dazamate\\SurrealGraphSync\\Node\\RecipeNode\.$#'
+			identifier: class.notFound
+			count: 1
+			path: includes/Settings/GraphInfoPage.php
+
+		-
+			message: '#^Undefined variable\: \$db$#'
+			identifier: variable.undefined
+			count: 1
+			path: includes/Settings/GraphInfoPage.php
+
+		-
+			message: '#^Match arm comparison between Dazamate\\SurrealGraphSync\\Enum\\QueryType\:\:TERM and Dazamate\\SurrealGraphSync\\Enum\\QueryType\:\:TERM is always true\.$#'
+			identifier: match.alwaysTrue
+			count: 1
+			path: includes/Utils/Inputs.php
