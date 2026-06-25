@@ -1,11 +1,11 @@
 # WP → SurrealDB Graph Sync
 
-Maps WordPress data (posts, users) into a graph format for SurrealDB. The plugin is
+Maps WordPress data (posts, users, terms) into a graph format for SurrealDB. The plugin is
 extended entirely through WordPress filters: you hook a filter, add typed **field
 objects** to the `MappedData` you're given, and return it.
 
-> **Objects only.** Field data is defined with typed DTOs (`StringField`, `NumberField`,
-> …) collected in a `MappedData` object. Relations are `RelationData` objects. The old
+> Field data is defined with typed DTOs (`StringField`, `NumberField`, `ArrayField`, etc…)
+> collected in a `MappedData` object. Relations are `RelationData` objects. The old
 > `['type' => ..., 'value' => ...]` array shape is no longer supported — each field is a
 > strict data parcel that the sync layer validates and renders.
 
