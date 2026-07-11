@@ -2,7 +2,7 @@
 /*
  * Plugin Name:       Surreal Graph Sync
  * Description:       Convert wordpress data to a Surreal DB graph data
- * Version:           1.0
+ * Version:           1.0.1
  * Requires PHP:      8.5
  * Author:            Dale Woods
  * Author URI:        https://dalewoods.me

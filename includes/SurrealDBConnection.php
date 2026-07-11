@@ -93,9 +93,15 @@ class SurrealDBConnection {
                 "database"      => $settings['db_name']
             ]);
 
-            $token = $db->signin([
-                "user" => $settings['db_username'],
-                "pass" => $settings['db_password']
+            $db->signin([
+                "user"      => $settings['db_username'],
+                "pass"      => $settings['db_password'],
+                "namespace" => $settings['db_namespace'],
+            ]);
+
+            $db->use([
+                "namespace" => $settings['db_namespace'],
+                "database"  => $settings['db_name'],
             ]);
 
             self::$_db = $db;
