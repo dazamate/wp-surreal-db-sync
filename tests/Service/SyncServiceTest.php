@@ -52,6 +52,18 @@ class SyncServiceTest extends TestCase {
         $this->assertSame('post:abc', SyncServiceProbe::recordId([['result' => 'post:abc', 'status' => 'OK']]));
     }
 
+    public function testRecordIdFromMultiStatementTransaction(): void {
+        // SurrealDB v3 returns every transaction statement; RETURN is not index 0.
+        $res = [
+            ['status' => 'OK', 'result' => null],
+            ['status' => 'OK', 'result' => null],
+            ['status' => 'OK', 'result' => null],
+            ['status' => 'OK', 'result' => 'tool:abc123'],
+            ['status' => 'OK', 'result' => null],
+        ];
+        $this->assertSame('tool:abc123', SyncServiceProbe::recordId($res));
+    }
+
     public function testRecordIdNullWhenMissing(): void {
         $this->assertNull(SyncServiceProbe::recordId([['result' => null, 'status' => 'OK']]));
         $this->assertNull(SyncServiceProbe::recordId(null));

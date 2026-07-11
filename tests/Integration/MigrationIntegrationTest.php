@@ -21,7 +21,10 @@ class MigrationIntegrationTest extends IntegrationTestCase {
 
     private function dbTables(): array {
         $info = $this->db->query('INFO FOR DB;')[0];
-        return array_keys($info['tables'] ?? []);
+        // v2 returned table names as map keys; v3 still does, with DEFINE TABLE
+        // strings as values.
+        $tables = $info['tables'] ?? [];
+        return is_array($tables) ? array_keys($tables) : [];
     }
 
     public function testPersonUpsertsWithoutAnyMigration(): void {
@@ -35,7 +38,7 @@ class MigrationIntegrationTest extends IntegrationTestCase {
 
         $this->assertContains('person', $this->dbTables());
 
-        $rows = $this->db->query('SELECT * FROM person WHERE user_id = 5;')[0];
+        $rows = $this->selectRows('SELECT * FROM person WHERE user_id = 5;');
         $this->assertCount(1, $rows);
         $this->assertSame('bob', $rows[0]['username']);
     }

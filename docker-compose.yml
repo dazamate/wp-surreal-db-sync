@@ -19,10 +19,8 @@ services:
       SURREAL_TEST_NS: test
       SURREAL_TEST_DB: test
 
-  # Ephemeral, in-memory SurrealDB used only by the test suite. All data is
-  # wiped when the container stops. Pinned for reproducible test runs.
   surrealdb:
-    image: surrealdb/surrealdb:v2.3.7
+    image: surrealdb/surrealdb:v3.2.0
     command: start --user root --pass root memory
     healthcheck:
       # The image is FROM scratch (no shell), so use the binary in exec form.

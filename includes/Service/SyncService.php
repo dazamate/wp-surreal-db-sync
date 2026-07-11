@@ -132,17 +132,25 @@ class SyncService {
         return $had_error ? [$generic] : [];
     }
 
-    // The transaction ends with `RETURN $rec`, so the response collapses to a single
-    // result holding the record id.
+    // The transaction ends with `RETURN $rec`. SurrealDB v2 may collapse the
+    // response to a single statement; v3 returns every statement (BEGIN/LET/
+    // RETURN/COMMIT), so scan for the first record id rather than assuming
+    // index 0.
     protected static function record_id_from_transaction(?array $res): ?string {
-        $result = $res[0]['result'] ?? null;
-
-        if ($result instanceof \Surreal\Cbor\Types\Record\RecordId) {
-            return $result->toString();
+        if (!is_array($res)) {
+            return null;
         }
 
-        if (is_string($result) && $result !== '') {
-            return $result;
+        foreach ($res as $statement) {
+            $result = $statement['result'] ?? null;
+
+            if ($result instanceof \Surreal\Cbor\Types\Record\RecordId) {
+                return $result->toString();
+            }
+
+            if (is_string($result) && $result !== '') {
+                return $result;
+            }
         }
 
         return null;

@@ -22,4 +22,8 @@ RUN curl -fsSL -o /usr/local/bin/php-scoper \
         https://github.com/humbug/php-scoper/releases/latest/download/php-scoper.phar \
     && chmod +x /usr/local/bin/php-scoper
 
+# Bind-mounted source is owned by the host user; silence git's dubious-ownership
+# check so composer can read the package version from the repo.
+RUN git config --global --add safe.directory /app
+
 WORKDIR /app

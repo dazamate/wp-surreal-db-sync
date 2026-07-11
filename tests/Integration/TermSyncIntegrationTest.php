@@ -62,7 +62,7 @@ class TermSyncIntegrationTest extends IntegrationTestCase {
         $this->assertArrayHasKey('term:7:surreal_id', $this->meta);
         $this->assertStringStartsWith('category:', $this->meta['term:7:surreal_id']);
 
-        $rows = $this->db->query('SELECT * FROM category WHERE term_id = 7;')[0];
+        $rows = $this->selectRows('SELECT * FROM category WHERE term_id = 7;');
         $this->assertCount(1, $rows);
         $this->assertSame('News', $rows[0]['name']);
     }
@@ -84,7 +84,7 @@ class TermSyncIntegrationTest extends IntegrationTestCase {
         $childId = $this->meta['term:7:surreal_id'] ?? null;
         $this->assertNotNull($childId);
 
-        $edges = $this->db->query('SELECT * FROM child_of;')[0];
+        $edges = $this->selectRows('SELECT * FROM child_of;');
         $this->assertCount(1, $edges);
         $this->assertSame($childId, $edges[0]['in']->toString());
         $this->assertSame($parent, $edges[0]['out']->toString());

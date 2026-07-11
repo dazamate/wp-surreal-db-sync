@@ -90,15 +90,21 @@ class QueryBuilder {
         MappedData $data,
         bool $unique = true // only one link allowed
     ) {
-        // Generates a relation query like this:
+        // Generates a relation query like this (SurrealDB v3):
         //
-        //   LET $rel_id = (SELECT id FROM created_by where in = ($person.id) and out = ($recipe.id)).id[0];
+        //   DEFINE TABLE IF NOT EXISTS created_by TYPE ANY SCHEMALESS;
+        //   LET $rel_id = (SELECT VALUE id FROM created_by WHERE in = $person AND out = $recipe)[0];
         //   IF $rel_id is NONE THEN {
-        //     LET $new_rel_id = (RELATE ($person.id)->created_by->($recipe.id));
-        //     UPDATE $new_rel_id CONTENT { units: 'created' };
-        //   } else {
+        //     LET $rel_id = (RELATE ($person)->created_by->($recipe))[0].id;
+        //     UPDATE $rel_id CONTENT { units: 'created' };
+        //   } ELSE {
         //     UPDATE $rel_id CONTENT { units: 'updated' };
         //   } END;
+        //
+        // v3 notes: bare `$x = ...` is rejected (needs LET); `(SELECT id ...).id[0]`
+        // no longer yields the record id (use SELECT VALUE id + [0]); RELATE
+        // returns an array so take [0].id; missing tables error on SELECT, so
+        // DEFINE TABLE first.
         $data_obj_str = self::build_object_str($data);
 
         if (!$unique) {
@@ -112,7 +118,12 @@ class QueryBuilder {
         }
 
         $q = sprintf(
-            'LET $rel_id = (SELECT id FROM %s where in = %s and out = %s).id[0];',
+            'DEFINE TABLE IF NOT EXISTS %s TYPE ANY SCHEMALESS;',
+            $relation_table_name
+        );
+
+        $q .= sprintf(
+            'LET $rel_id = (SELECT VALUE id FROM %s WHERE in = %s AND out = %s)[0];',
             $relation_table_name,
             $from_record_id,
             $to_record_id
@@ -120,7 +131,7 @@ class QueryBuilder {
 
         $q .= 'IF $rel_id is NONE THEN {';
         $q .= sprintf(
-            '$rel_id = (RELATE (%s)->%s->(%s));',
+            'LET $rel_id = (RELATE (%s)->%s->(%s))[0].id;',
             $from_record_id,
             $relation_table_name,
             $to_record_id
@@ -131,7 +142,7 @@ class QueryBuilder {
             $data_obj_str
         );
 
-        $q .= '} else {';
+        $q .= '} ELSE {';
 
         $q .= sprintf(
             'UPDATE $rel_id CONTENT %s;',

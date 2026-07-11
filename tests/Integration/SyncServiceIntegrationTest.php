@@ -88,12 +88,12 @@ class SyncServiceIntegrationTest extends IntegrationTestCase {
         $this->assertStringStartsWith('post:', $this->meta['post:123:surreal_id']);
 
         // Record landed.
-        $posts = $this->db->query('SELECT * FROM post WHERE post_id = 123;')[0];
+        $posts = $this->selectRows('SELECT * FROM post WHERE post_id = 123;');
         $this->assertCount(1, $posts);
         $this->assertSame('Atomic', $posts[0]['title']);
 
         // Self-referencing edge landed, pointing out of the new post record.
-        $edges = $this->db->query('SELECT * FROM wrote;')[0];
+        $edges = $this->selectRows('SELECT * FROM wrote;');
         $this->assertCount(1, $edges);
         $this->assertSame('author', $edges[0]['role']);
         $this->assertSame($this->meta['post:123:surreal_id'], $edges[0]['in']->toString());
@@ -121,7 +121,7 @@ class SyncServiceIntegrationTest extends IntegrationTestCase {
 
         // No surreal id written, and the record was never created.
         $this->assertArrayNotHasKey('post:123:surreal_id', $this->meta);
-        $posts = $this->db->query('SELECT * FROM post WHERE post_id = 123;')[0];
+        $posts = $this->selectRows('SELECT * FROM post WHERE post_id = 123;');
         $this->assertCount(0, $posts);
     }
 
@@ -144,11 +144,11 @@ class SyncServiceIntegrationTest extends IntegrationTestCase {
         $this->assertArrayHasKey('user:55:surreal_id', $this->meta);
         $this->assertStringStartsWith('person:', $this->meta['user:55:surreal_id']);
 
-        $people = $this->db->query('SELECT * FROM person WHERE user_id = 55;')[0];
+        $people = $this->selectRows('SELECT * FROM person WHERE user_id = 55;');
         $this->assertCount(1, $people);
         $this->assertSame('dale', $people[0]['username']);
 
-        $edges = $this->db->query('SELECT * FROM member_of;')[0];
+        $edges = $this->selectRows('SELECT * FROM member_of;');
         $this->assertCount(1, $edges);
         $this->assertSame(2020, $edges[0]['since']);
     }

@@ -43,6 +43,12 @@ abstract class IntegrationTestCase extends TestCase {
             'pass' => $pass,
         ]);
 
+        // SurrealDB v3 no longer auto-creates namespaces/databases on first
+        // use — root must DEFINE them before selecting.
+        $this->db->query(sprintf('DEFINE NAMESPACE IF NOT EXISTS %s;', $ns));
+        $this->db->query(sprintf('USE NS %s;', $ns));
+        $this->db->query(sprintf('DEFINE DATABASE IF NOT EXISTS %s;', $db_name));
+
         // signin clears any pre-auth namespace/database selection on some
         // engines, so re-select after authenticating.
         $this->db->use([
@@ -65,6 +71,23 @@ abstract class IntegrationTestCase extends TestCase {
      */
     protected function query(string $surql): ?array {
         return $this->db->query($surql);
+    }
+
+    /**
+     * Rows from a SELECT, treating a missing table (SurrealDB v3 NotFound) as
+     * an empty result set — v2 returned [] for unknown tables.
+     *
+     * @return list<array<string,mixed>>
+     */
+    protected function selectRows(string $surql): array {
+        $res = $this->db->query($surql);
+        $rows = $res[0] ?? [];
+
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        return $rows;
     }
 
     /**

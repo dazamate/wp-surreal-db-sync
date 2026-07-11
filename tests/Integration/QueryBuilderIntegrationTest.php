@@ -32,7 +32,7 @@ class QueryBuilderIntegrationTest extends IntegrationTestCase {
 
         $this->assertInstanceOf(RecordId::class, $res[0][0]['id']);
 
-        $rows = $this->db->query('SELECT * FROM post WHERE post_id = 1;')[0];
+        $rows = $this->selectRows('SELECT * FROM post WHERE post_id = 1;');
         $this->assertCount(1, $rows);
         $this->assertSame("O'Brien", $rows[0]['title']);
         $this->assertSame(1, $rows[0]['post_id']);
@@ -47,7 +47,7 @@ class QueryBuilderIntegrationTest extends IntegrationTestCase {
         $this->db->query($q);
         $this->db->query($q);
 
-        $edges = $this->db->query('SELECT * FROM wrote;')[0];
+        $edges = $this->selectRows('SELECT * FROM wrote;');
         $this->assertCount(2, $edges, 'non-unique relate should allow duplicate edges');
     }
 
@@ -62,7 +62,7 @@ class QueryBuilderIntegrationTest extends IntegrationTestCase {
             $from, $to, 'wrote', (new MappedData())->set('role', new StringField('editor')), true
         ));
 
-        $edges = $this->db->query('SELECT * FROM wrote;')[0];
+        $edges = $this->selectRows('SELECT * FROM wrote;');
         $this->assertCount(1, $edges, 'unique relate should not create a second edge');
         $this->assertSame('editor', $edges[0]['role'], 'unique relate should update the existing edge data');
     }
@@ -87,12 +87,20 @@ class QueryBuilderIntegrationTest extends IntegrationTestCase {
         foreach ($res as $statement) {
             $this->assertSame('OK', $statement['status'] ?? 'OK', 'no statement should error');
         }
-        $this->assertInstanceOf(RecordId::class, $res[0]['result'], 'transaction returns the record id');
+        // v3 returns every txn statement (BEGIN/LET/RETURN/COMMIT); find RETURN.
+        $recordId = null;
+        foreach ($res as $statement) {
+            if (($statement['result'] ?? null) instanceof RecordId) {
+                $recordId = $statement['result'];
+                break;
+            }
+        }
+        $this->assertInstanceOf(RecordId::class, $recordId, 'transaction returns the record id');
 
-        $posts = $this->db->query('SELECT * FROM post WHERE post_id = 5;')[0];
+        $posts = $this->selectRows('SELECT * FROM post WHERE post_id = 5;');
         $this->assertCount(1, $posts);
 
-        $edges = $this->db->query('SELECT * FROM wrote;')[0];
+        $edges = $this->selectRows('SELECT * FROM wrote;');
         $this->assertCount(1, $edges);
         $this->assertSame(1, $edges[0]['n']);
     }
@@ -115,7 +123,7 @@ class QueryBuilderIntegrationTest extends IntegrationTestCase {
         $statuses = array_map(static fn($s) => $s['status'] ?? 'OK', $res);
         $this->assertContains('ERR', $statuses, 'a broken edge should fail the transaction');
 
-        $posts = $this->db->query('SELECT * FROM post WHERE post_id = 6;')[0];
+        $posts = $this->selectRows('SELECT * FROM post WHERE post_id = 6;');
         $this->assertCount(0, $posts, 'the record upsert must roll back with the failed edge');
     }
 }
