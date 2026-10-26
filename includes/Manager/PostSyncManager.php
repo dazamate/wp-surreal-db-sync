@@ -14,7 +14,8 @@ class PostSyncManager {
         add_action('save_post', [__CLASS__, 'on_post_save'], 100, 3);
         add_action('before_delete_post', [__CLASS__, 'on_post_delete'], 10, 1);
         add_action('trashed_post', [__CLASS__, 'on_post_trash'], 10, 1);
-        add_action('untrash_post', [__CLASS__, 'on_post_untrash'], 10, 1);
+        // No untrash hook: untrash_post fires while the post is still `trash`. Restoring then saves
+        // the post with its new status, and on_post_save handles that.
 
         add_action('post_submitbox_misc_actions', [__CLASS__, 'render_surreal_id_info']);
     }
@@ -37,18 +38,16 @@ class PostSyncManager {
         echo '</div>';
     }
    
+    // Runs on save_post (after CMB2 has saved its meta). SurrealDB records carry no status, so
+    // anything synced is live: a post that isn't in a syncable status has its record removed.
+    // Quick Edit saves over AJAX, so AJAX saves are handled too; autosaves and revisions aren't.
     public static function on_post_save(int $post_id, \WP_Post $post, bool $update) {
-        if ( wp_is_post_revision( $post_id ) || ( defined( 'DOING_AJAX' ) && DOING_AJAX ) ) {
+        if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
             return;
         }
 
-        // Ignore trying to sync drafts
-        $ignore_post_states = [
-            'draft',
-            'auto-draft',
-        ];
-
-        if ( in_array( $post->post_status, $ignore_post_states, true ) ) {
+        if ( ! self::is_syncable_status( $post ) ) {
+            SurrealUtils::delete_surreal_record_by_post_id( $post_id );
             return;
         }
 
@@ -56,13 +55,28 @@ class PostSyncManager {
     }
 
     /**
+     * Statuses whose posts belong in SurrealDB. Default: publish only. Scheduled posts sync when
+     * WordPress publishes them (wp_publish_post fires save_post).
+     */
+    public static function is_syncable_status( \WP_Post $post ): bool {
+        $statuses = apply_filters( 'surreal_sync_post_statuses', [ 'publish' ], $post );
+
+        return is_array( $statuses ) && in_array( $post->post_status, $statuses, true );
+    }
+
+    /**
      * Map and fire surreal_sync_post for a single post (same path as save_post).
-     * Returns false when the post type is not opted in or mapping produced nothing useful.
+     * Returns false when the post isn't in a syncable status, the post type is not opted in,
+     * or mapping produced nothing useful.
      */
     public static function sync_post( int $post_id, ?\WP_Post $post = null ): bool {
         $post ??= get_post( $post_id );
 
         if ( ! ( $post instanceof \WP_Post ) ) {
+            return false;
+        }
+
+        if ( ! self::is_syncable_status( $post ) ) {
             return false;
         }
 
@@ -89,14 +103,6 @@ class PostSyncManager {
     }
 
     public static function on_post_trash(int $post_id) {
-        SurrealUtils::delete_surreal_record_by_post_id($post_id);        
-    }
-
-    public static function on_post_untrash(int $post_id) {
-        $post = get_post($post_id);
-
-        if ( ! ( $post instanceof \WP_Post ) ) return;
-        
-        self::on_post_save($post_id, $post, true);
+        SurrealUtils::delete_surreal_record_by_post_id($post_id);
     }
 }

@@ -16,6 +16,10 @@ if (!class_exists('WP_Post')) {
         public int $ID = 0;
         public string $post_type = '';
         public string $post_title = '';
+        public string $post_status = 'publish';
+        public string $post_content = '';
+        public string $post_date_gmt = '';
+        public string $post_modified_gmt = '';
     }
 }
 

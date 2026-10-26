@@ -13,7 +13,6 @@ use Dazamate\SurrealGraphSync\SurrealDBConnection;
  * Usage:
  *   wp surreal sync --post_type=ingredient
  *   wp surreal sync --post_type=attachment
- *   wp surreal sync --post_type=recipe --include-drafts
  *   wp surreal sync --post_type=ingredient --id=123
  */
 class SyncPostsCommand {
@@ -37,10 +36,10 @@ class SyncPostsCommand {
      * : Sync a single post ID only (must match --post_type).
      *
      * [--status=<status>]
-     * : Comma-separated post statuses. Default: publish (attachment defaults to inherit,any).
-     *
-     * [--include-drafts]
-     * : Also sync draft / auto-draft posts (ignored if --status is set).
+     * : Comma-separated post statuses to query. Default: publish (attachment defaults to
+     * inherit,private,publish). Posts outside the syncable statuses (publish, unless the
+     * `surreal_sync_post_statuses` filter adds more) are skipped: SurrealDB records carry no
+     * status, so anything synced is live.
      *
      * [--limit=<n>]
      * : Max posts to process (0 = no limit). Default: 0.
@@ -57,7 +56,7 @@ class SyncPostsCommand {
      *     wp surreal sync --post_type=cooking-tool
      *     wp surreal sync --post_type=cooking-supply
      *     wp surreal sync --post_type=attachment
-     *     wp surreal sync --post_type=recipe --include-drafts
+     *     wp surreal sync --post_type=recipe
      *     wp surreal sync --post_type=ingredient --id=42
      *
      * @param array<int, string>    $args
@@ -131,17 +130,25 @@ class SyncPostsCommand {
 
                 if ( ! $fired ) {
                     ++$skipped;
-                    \WP_CLI::warning( sprintf( '#%d skipped (not mapped / not an image)', $post_id ) );
+                    \WP_CLI::warning( sprintf( '#%d skipped (not published / not mapped / not an image)', $post_id ) );
                     $progress->tick();
                     continue;
                 }
 
                 $errors = get_post_meta( $post_id, MetaKeys::SURREAL_SYNC_ERROR_META_KEY->value, true );
 
-                if ( ! empty( $errors ) && is_array( $errors ) ) {
+                // Warnings (a skipped link) are stored with errors but the record still synced.
+                $is_warning = static fn( $e ): bool => is_string( $e ) && str_starts_with( $e, 'Surreal sync warning:' );
+                $hard       = is_array( $errors ) ? array_filter( $errors, static fn( $e ): bool => ! $is_warning( $e ) ) : [];
+
+                if ( ! empty( $hard ) ) {
                     ++$failed;
-                    \WP_CLI::warning( sprintf( '#%d failed: %s', $post_id, implode( '; ', $errors ) ) );
+                    \WP_CLI::warning( sprintf( '#%d failed: %s', $post_id, implode( '; ', $hard ) ) );
                 } else {
+                    if ( ! empty( $errors ) && is_array( $errors ) ) {
+                        \WP_CLI::warning( sprintf( '#%d synced with warnings: %s', $post_id, implode( '; ', $errors ) ) );
+                    }
+
                     ++$ok;
                     $sid = get_post_meta( $post_id, MetaKeys::SURREAL_DB_RECORD_ID_META_KEY->value, true );
                     \WP_CLI::log( sprintf( '  #%d → %s', $post_id, $sid !== '' && $sid !== false ? $sid : '(no id)' ) );
@@ -179,14 +186,7 @@ class SyncPostsCommand {
             return [ 'inherit', 'private', 'publish' ];
         }
 
-        $statuses = [ 'publish', 'private' ];
-
-        if ( isset( $assoc_args['include-drafts'] ) ) {
-            $statuses[] = 'draft';
-            $statuses[] = 'auto-draft';
-        }
-
-        return $statuses;
+        return [ 'publish' ];
     }
 
     /**
