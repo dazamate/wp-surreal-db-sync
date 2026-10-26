@@ -2,8 +2,11 @@ name: Build & Release Plugin
 
 # Builds a production, namespace-scoped plugin zip (dev files excluded) and
 # publishes it as a GitHub release when the version in the plugin header is
-# above the latest existing release. Triggered manually from the Actions tab.
+# above the latest existing release. Runs on every push to master (it skips when the
+# header version isn't above the latest release) and can be started from the Actions tab.
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
 
 # Required so the workflow can create releases and upload assets.
