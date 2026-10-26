@@ -55,6 +55,10 @@ add_action( 'plugins_loaded', function() {
 
     SyncService::load_hooks();
     PostSyncService::load_hooks();
+
+    // Feature flag for mappers: posts can own relation tables (surreal_graph_owned_relations),
+    // whose edges are rebuilt on every save. Mappers check this before relying on it.
+    add_filter( 'surreal_graph_supports_owned_relations', '__return_true' );
     UserSyncService::load_hooks();
     TermSyncService::load_hooks();
 

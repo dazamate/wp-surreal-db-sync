@@ -55,8 +55,13 @@ class SyncService {
     // transaction — either everything commits or nothing is written. $subject is the WP
     // record being saved; its id and type drive the WHERE match and the resolution of any
     // relation endpoint that points back at this record (rendered as the `$rec` variable).
+    //
+    // $owned_relations are relation tables whose edges out of this record are rebuilt from
+    // scratch on every save (see QueryBuilder::build_sync_transaction). A relation whose other
+    // end isn't in Surreal yet is skipped and reported in $warnings; it doesn't block the save.
     /**
      * @param SurrealClientInterface|\Surreal\Surreal $db
+     * @param list<string> $owned_relations
      */
     protected static function persist_entity(
         object $db,
@@ -64,13 +69,23 @@ class SyncService {
         MappedData $entity_data,
         array $raw_related_mappings,
         WordPressId $subject,
-        array &$errors
+        array &$errors,
+        array $owned_relations = [],
+        ?array &$warnings = null
     ): ?string {
         $query_type = $subject->type;
         $self_wp_id = $subject->id;
         $where_clause = sprintf('%s_id = %d', $query_type->value, $self_wp_id);
+        $warnings ??= [];
 
-        $resolved_relations = self::validate_relation_mapping($raw_related_mappings, $query_type, $errors, $self_wp_id);
+        foreach ($owned_relations as $relation_table) {
+            if (!is_string($relation_table) || !QueryBuilder::is_valid_table_name($relation_table)) {
+                $errors[] = sprintf('Surreal sync error: invalid owned relation table name %s', var_export($relation_table, true));
+                return null;
+            }
+        }
+
+        $resolved_relations = self::validate_relation_mapping($raw_related_mappings, $query_type, $errors, $self_wp_id, $warnings);
 
         if ($resolved_relations === false) {
             return null;
@@ -87,7 +102,7 @@ class SyncService {
             $resolved_relations
         );
 
-        $q = QueryBuilder::build_sync_transaction($table, $where_clause, $entity_data, $relation_queries);
+        $q = QueryBuilder::build_sync_transaction($table, $where_clause, $entity_data, $relation_queries, $owned_relations);
 
         try {
             $res = $db->queryRaw($q);
@@ -219,7 +234,13 @@ class SyncService {
     // then resolve its endpoints to Surreal record ids. When $self_wp_id is given, an endpoint
     // matching it resolves to the in-transaction `$rec` so a record can relate to itself before
     // its id has been persisted. Returns resolved RelationData, or false on the first failure.
-    public static function validate_relation_mapping(array $related_data_mappings, QueryType $query_type, array &$errors, ?int $self_wp_id = null): array|false {
+    //
+    // When $warnings is given, an endpoint that can't be resolved (usually a related post that
+    // hasn't been synced yet) skips that one relation and adds a warning instead of failing.
+    // An invalid RelationData still fails: that's a mapping bug, not missing data.
+    public static function validate_relation_mapping(array $related_data_mappings, QueryType $query_type, array &$errors, ?int $self_wp_id = null, ?array &$warnings = null): array|false {
+        $skip_unresolved = $warnings !== null;
+
         $resolved = [];
 
         foreach ($related_data_mappings as $relation) {
@@ -243,16 +264,17 @@ class SyncService {
             // and a reference to the record being saved becomes the `$rec`
             // transaction variable.
             $from_record = self::resolve_endpoint((string) $relation->from_record, $query_type, $self_wp_id);
+            $to_record   = empty($from_record) ? null : self::resolve_endpoint((string) $relation->to_record, $query_type, $self_wp_id);
 
-            if (empty($from_record)) {
-                $errors[] = self::endpoint_error('from_record', $relation);
-                return false;
-            }
+            if (empty($from_record) || empty($to_record)) {
+                $message = self::endpoint_error(empty($from_record) ? 'from_record' : 'to_record', $relation);
 
-            $to_record = self::resolve_endpoint((string) $relation->to_record, $query_type, $self_wp_id);
+                if ($skip_unresolved) {
+                    $warnings[] = sprintf('Surreal sync warning: %s. That link was left out; the rest was saved.', $message);
+                    continue;
+                }
 
-            if (empty($to_record)) {
-                $errors[] = self::endpoint_error('to_record', $relation);
+                $errors[] = $message;
                 return false;
             }
 

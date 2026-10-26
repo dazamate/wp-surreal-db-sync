@@ -11,6 +11,26 @@ use Dazamate\SurrealGraphSync\Enum\MetaKeys;
 class TermAssociationManager {
     public static function register() {
         add_filter('surreal_graph_map_related', [__CLASS__, 'append_term_relations'], 10, 2);
+        add_filter('surreal_graph_owned_relations', [__CLASS__, 'own_term_relations'], 10, 2);
+    }
+
+    // The post owns its term edges, so an unticked term's edge is removed on the next save.
+    public static function own_term_relations(array $owned, \WP_Post $post): array {
+        $auto_taxonomies = apply_filters('surreal_graph_auto_term_relations', []);
+
+        if (empty($auto_taxonomies) || !is_array($auto_taxonomies)) {
+            return $owned;
+        }
+
+        $post_taxonomies = get_object_taxonomies($post->post_type);
+
+        foreach ($auto_taxonomies as $taxonomy) {
+            if (!in_array($taxonomy, $post_taxonomies, true)) continue;
+
+            $owned[] = apply_filters('surreal_graph_term_relation_name', 'has_' . $taxonomy, $taxonomy, $post->post_type);
+        }
+
+        return $owned;
     }
 
     public static function append_term_relations(array $relations, \WP_Post $post): array {

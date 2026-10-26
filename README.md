@@ -109,6 +109,15 @@ but left misconfigured downstream.
 > the `surreal_graph_user_role_map` role → table map. In every case, "not registered"
 > means "skipped silently", never an error.
 
+**Only published posts sync.** SurrealDB records carry no status, so whatever is synced
+is treated as live. A post syncs on `save_post` when its status is `publish`; when it's
+saved with any other status (draft, pending, private, trash) its record is deleted.
+Scheduled posts sync when WordPress publishes them. Widen the list with:
+
+```php
+apply_filters('surreal_sync_post_statuses', string[] $statuses = ['publish'], \WP_Post $post): array;
+```
+
 ## Mapping post types
 
 When a post is created/updated, this filter is called for its post type. You receive a
@@ -298,6 +307,30 @@ add_filter('surreal_graph_map_related', function (array $mappings, \WP_Post $pos
 }, 10, 2);
 ```
 
+### Owned relations
+
+By default an edge, once created, stays until either end is deleted: if the mapping stops
+producing it (a recipe line is removed), the old edge lingers. Declare the relation tables
+a post **owns** and its outgoing edges there are deleted and rebuilt inside the same
+transaction on every save:
+
+```php
+apply_filters('surreal_graph_owned_relations', string[] $tables, \WP_Post $post): array;
+
+add_filter('surreal_graph_owned_relations', function (array $tables, \WP_Post $post): array {
+    if ($post->post_type === 'recipe') {
+        $tables[] = 'uses_ingredient';
+    }
+    return $tables;
+}, 10, 2);
+```
+
+Because owned edges are recreated each time, use `unique: false` for them when the same
+pair can legitimately appear twice (the same ingredient on two lines). Edge ids change on
+every save. `has_{taxonomy}` edges from [auto term associations](#auto-term-associations)
+are owned automatically. Mappers can check for support with
+`apply_filters('surreal_graph_supports_owned_relations', false)`.
+
 ## Mapping taxonomy terms
 
 Taxonomy terms sync the same way as posts: a **taxonomy maps to a Surreal table** and each
@@ -344,7 +377,6 @@ which receives the taxonomy and post type).
 > **Best-effort.** Auto-derived edges (`child_of` and `has_{taxonomy}`) are only created for
 > terms that have already been synced to Surreal. A term referenced before it's synced is
 > skipped so the record still saves — re-saving once everything exists wires the edge.
-> *Manually* mapped relations stay strict: an unresolved endpoint aborts the sync.
 
 
 ## Atomic sync
@@ -358,14 +390,14 @@ record.
 Because the whole thing is one transaction, a relation may reference the record
 being saved by its WP id **even on a first save**, before that record has a
 Surreal id — it's resolved to the record created earlier in the same
-transaction. An endpoint that can't be resolved (e.g. a numeric WP id for a post
-that has never been synced) aborts the sync before anything is written.
+transaction.
 
-For example, saving a brand-new `order` post that relates the customer to three
-products writes the `order` record **and** all three `purchased` edges in one shot.
-If the third product has never been synced (its endpoint can't be resolved), the
-whole order rolls back — you won't be left with an order that's missing a line item,
-or edges dangling off an order that didn't save.
+**A missing related record never blocks a save.** An endpoint that can't be
+resolved (e.g. a numeric WP id for a post that has never been synced) skips that
+one edge; the record and its other edges still commit, and the editor shows a
+"Surreal sync warning" naming the link that was left out. Re-saving once the
+related post is synced wires the edge. A malformed `RelationData` (a mapping bug)
+still aborts the sync.
 
 
 ## Migrations (optional — you usually don't need one)

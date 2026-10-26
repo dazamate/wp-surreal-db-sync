@@ -61,17 +61,29 @@ class QueryBuilder {
     // of its relation edges. The upserted record's id is captured in `$rec` so relation
     // statements can reference the record being saved before its id is known; ending with
     // `RETURN $rec;` collapses the response to the record id on success.
+    //
+    // $owned_relations names relation tables whose edges out of this record are rebuilt on
+    // every save: they're deleted before the relation queries run, so an edge the mapping no
+    // longer produces (a removed recipe line, an unticked term) doesn't linger. Names must
+    // already be validated with is_valid_table_name().
     public static function build_sync_transaction(
         string $table,
         string $where_clause,
         MappedData $entity_data,
-        array $relation_queries
+        array $relation_queries,
+        array $owned_relations = []
     ): string {
         $content = self::build_object_str($entity_data);
 
         $q  = 'BEGIN TRANSACTION;';
         $q .= sprintf('LET $rec_res = (UPSERT %s CONTENT %s WHERE %s RETURN id);', $table, $content, $where_clause);
         $q .= 'LET $rec = $rec_res[0].id;';
+
+        foreach (array_unique($owned_relations) as $relation_table) {
+            // v3 errors on a missing table, so define it before deleting from it.
+            $q .= sprintf('DEFINE TABLE IF NOT EXISTS %s TYPE ANY SCHEMALESS;', $relation_table);
+            $q .= sprintf('DELETE %s WHERE in = $rec;', $relation_table);
+        }
 
         foreach ($relation_queries as $relation_query) {
             $q .= $relation_query;
@@ -81,6 +93,11 @@ class QueryBuilder {
         $q .= 'COMMIT TRANSACTION;';
 
         return $q;
+    }
+
+    // Table names are interpolated into queries, so only plain identifiers are accepted.
+    public static function is_valid_table_name(string $name): bool {
+        return preg_match('/^[a-z_][a-z0-9_]*$/i', $name) === 1;
     }
 
     static public function build_relate_query(
