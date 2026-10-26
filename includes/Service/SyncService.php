@@ -57,8 +57,10 @@ class SyncService {
     // relation endpoint that points back at this record (rendered as the `$rec` variable).
     //
     // $owned_relations are relation tables whose edges out of this record are rebuilt from
-    // scratch on every save (see QueryBuilder::build_sync_transaction). A relation whose other
-    // end isn't in Surreal yet is skipped and reported in $warnings; it doesn't block the save.
+    // scratch on every save (see QueryBuilder::build_sync_transaction). When the caller passes
+    // $warnings, a relation whose other end isn't in Surreal yet is skipped and reported there
+    // instead of failing the save. Callers that don't (term and user syncs) keep failing, so
+    // nothing is dropped without a message.
     /**
      * @param SurrealClientInterface|\Surreal\Surreal $db
      * @param list<string> $owned_relations
@@ -76,7 +78,6 @@ class SyncService {
         $query_type = $subject->type;
         $self_wp_id = $subject->id;
         $where_clause = sprintf('%s_id = %d', $query_type->value, $self_wp_id);
-        $warnings ??= [];
 
         foreach ($owned_relations as $relation_table) {
             if (!is_string($relation_table) || !QueryBuilder::is_valid_table_name($relation_table)) {

@@ -173,6 +173,19 @@ class SyncServiceIntegrationTest extends IntegrationTestCase {
         $this->assertCount(1, $this->selectRows('SELECT * FROM recipe WHERE post_id = 123;'));
     }
 
+    public function testSyncUserStillAbortsWhenRelationUnresolvable(): void {
+        // Only post syncs opt in to skip-with-warning; a user sync must not drop a link silently.
+        $user = new \WP_User();
+        $user->ID = 56;
+
+        UserSyncService::sync_user($user, 'person', (new MappedData())->set('user_id', new NumberField(56)), [
+            new RelationData(56, 999, 'member_of', null, true),
+        ]);
+
+        $this->assertArrayNotHasKey('user:56:surreal_id', $this->meta);
+        $this->assertCount(0, $this->selectRows('SELECT * FROM person WHERE user_id = 56;'));
+    }
+
     public function testSyncUserPersistsRecordAndWritesMeta(): void {
         $org = $this->makeRecord('org', 1);
 

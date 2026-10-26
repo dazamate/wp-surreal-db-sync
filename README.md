@@ -392,12 +392,13 @@ being saved by its WP id **even on a first save**, before that record has a
 Surreal id — it's resolved to the record created earlier in the same
 transaction.
 
-**A missing related record never blocks a save.** An endpoint that can't be
-resolved (e.g. a numeric WP id for a post that has never been synced) skips that
-one edge; the record and its other edges still commit, and the editor shows a
-"Surreal sync warning" naming the link that was left out. Re-saving once the
-related post is synced wires the edge. A malformed `RelationData` (a mapping bug)
-still aborts the sync.
+**A missing related record never blocks a post save.** For posts, an endpoint
+that can't be resolved (e.g. a numeric WP id for a post that has never been
+synced) skips that one edge; the record and its other edges still commit, and the
+editor shows a "Surreal sync warning" naming the link that was left out.
+Re-saving once the related post is synced wires the edge. A malformed
+`RelationData` (a mapping bug) still aborts the sync. Term and user syncs keep the
+strict behaviour: an unresolved endpoint aborts that sync with an error.
 
 
 ## Migrations (optional — you usually don't need one)
