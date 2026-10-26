@@ -63,13 +63,29 @@ class ImageSyncManager {
     }
 
     public static function on_attatchemnt_change(int $post_id) {
-        $post = get_post($post_id);
-        $surreal_table_name = apply_filters('surreal_map_post_table_name', 'image', $post->post_type, $post_id);
+        self::sync_attachment( $post_id );
+    }
 
-        if (strpos($post->post_mime_type, 'image/') === 0) {
-            $mapped_data = apply_filters('surreal_graph_map_image', new MappedData(), $post_id);
-            do_action('surreal_sync_post', $post, $surreal_table_name, $mapped_data);
+    /**
+     * Map and fire surreal_sync_post for an image attachment (same path as media save).
+     */
+    public static function sync_attachment( int $post_id, ?\WP_Post $post = null ): bool {
+        $post ??= get_post( $post_id );
+
+        if ( ! ( $post instanceof \WP_Post ) ) {
+            return false;
         }
+
+        if ( strpos( (string) $post->post_mime_type, 'image/' ) !== 0 ) {
+            return false;
+        }
+
+        $surreal_table_name = apply_filters( 'surreal_map_post_table_name', 'image', $post->post_type, $post_id );
+        $mapped_data        = apply_filters( 'surreal_graph_map_image', new MappedData(), $post_id );
+
+        do_action( 'surreal_sync_post', $post, $surreal_table_name, $mapped_data );
+
+        return true;
     }
 
     public static function map_surreal_table_name(string $surreal_table_name, string $post_type, int $post_id) {

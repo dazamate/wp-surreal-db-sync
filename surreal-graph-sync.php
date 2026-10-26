@@ -14,6 +14,7 @@ require_once plugin_dir_path( __FILE__ ) . 'vendor/autoload.php';
 use Dazamate\SurrealGraphSync\SurrealDBConnection;
 use Dazamate\SurrealGraphSync\Settings\AdminSettings;
 use Dazamate\SurrealGraphSync\Manager\PostSyncManager;
+use Dazamate\SurrealGraphSync\Manager\SurrealDataPreviewManager;
 use Dazamate\SurrealGraphSync\Manager\UserSyncManager;
 use Dazamate\SurrealGraphSync\Manager\ImageSyncManager;
 use Dazamate\SurrealGraphSync\Manager\TermSyncManager;
@@ -35,6 +36,11 @@ use Dazamate\SurrealGraphSync\Mapper\User\UserMapper;
 use Dazamate\SurrealGraphSync\Mapper\User\PersonMapper;
 
 use Dazamate\SurrealGraphSync\Mapper\Term\TermMapper;
+use Dazamate\SurrealGraphSync\Cli\SyncPostsCommand;
+
+if ( defined( 'WP_CLI' ) && WP_CLI ) {
+    SyncPostsCommand::register();
+}
 
 add_action( 'plugins_loaded', function() {
     SurrealDBConnection::init_db_connection();
@@ -66,6 +72,7 @@ add_action('init', function () {
     TermErrorManager::load_hooks();
 
     PostSyncManager::load_hooks();
+    SurrealDataPreviewManager::load_hooks();
     UserSyncManager::load_hooks();
     ImageSyncManager::load_hooks();
     TermSyncManager::load_hooks();

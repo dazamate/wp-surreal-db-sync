@@ -2,6 +2,7 @@
 
 namespace Dazamate\SurrealGraphSync\Service;
 
+use Dazamate\SurrealGraphSync\Client\SurrealClientInterface;
 use Dazamate\SurrealGraphSync\Query\QueryBuilder;
 use Dazamate\SurrealGraphSync\Data\MappedData;
 use Dazamate\SurrealGraphSync\Data\RelationData;
@@ -18,16 +19,28 @@ class SyncService {
         add_action('surreal_delete_record', [__CLASS__, 'delete_record']);
     }
 
-    protected static function get_surreal_db_conn(array &$errors): ?\Surreal\Surreal {
-        $db = apply_filters('get_surreal_db_conn', null);
+    /**
+     * @return SurrealClientInterface|\Surreal\Surreal|null
+     */
+    protected static function get_surreal_db_conn( array &$errors ): ?object {
+        $db = apply_filters( 'get_surreal_db_conn', null );
 
-        if ( ! ( $db instanceof \Surreal\Surreal ) ) {
+        if ( ! self::is_queryable( $db ) ) {
             $errors[] = 'Surreal sync error: Unable to establish database connection';
-            error_log('Unable to get Surreal DB connection ' . __FUNCTION__ . ' ' . __LINE__);
-            return NULL;
+            error_log( 'Unable to get Surreal DB connection ' . __FUNCTION__ . ' ' . __LINE__ );
+            return null;
         }
 
         return $db;
+    }
+
+    /**
+     * Duck-type check so integration tests can still inject the official SDK.
+     */
+    private static function is_queryable( mixed $db ): bool {
+        return is_object( $db )
+            && method_exists( $db, 'query' )
+            && method_exists( $db, 'queryRaw' );
     }
 
     protected static function try_get_record_id_from_response(array $res): ?string {
@@ -42,8 +55,11 @@ class SyncService {
     // transaction — either everything commits or nothing is written. $subject is the WP
     // record being saved; its id and type drive the WHERE match and the resolution of any
     // relation endpoint that points back at this record (rendered as the `$rec` variable).
+    /**
+     * @param SurrealClientInterface|\Surreal\Surreal $db
+     */
     protected static function persist_entity(
-        \Surreal\Surreal $db,
+        object $db,
         string $table,
         MappedData $entity_data,
         array $raw_related_mappings,
@@ -134,22 +150,51 @@ class SyncService {
 
     // The transaction ends with `RETURN $rec`. SurrealDB v2 may collapse the
     // response to a single statement; v3 returns every statement (BEGIN/LET/
-    // RETURN/COMMIT), so scan for the first record id rather than assuming
-    // index 0.
-    protected static function record_id_from_transaction(?array $res): ?string {
-        if (!is_array($res)) {
+    // RELATE/RETURN/COMMIT). RELATE rows also contain an `id`, so we must not
+    // take the first id we see — prefer a bare record-id result (the RETURN),
+    // scanning from the end.
+    protected static function record_id_from_transaction( ?array $res ): ?string {
+        if ( ! is_array( $res ) ) {
             return null;
         }
 
-        foreach ($res as $statement) {
-            $result = $statement['result'] ?? null;
+        // 1) Bare record id string / RecordId (RETURN $rec) — walk backwards.
+        for ( $i = count( $res ) - 1; $i >= 0; $i-- ) {
+            $result = $res[ $i ]['result'] ?? null;
 
-            if ($result instanceof \Surreal\Cbor\Types\Record\RecordId) {
+            if ( $result instanceof \Surreal\Cbor\Types\Record\RecordId ) {
                 return $result->toString();
             }
 
-            if (is_string($result) && $result !== '') {
+            if ( is_string( $result ) && $result !== '' && str_contains( $result, ':' ) ) {
                 return $result;
+            }
+        }
+
+        // 2) Fallback: UPSERT ... RETURN id → [ { id: ... } ] / [ RecordId ]
+        foreach ( $res as $statement ) {
+            $result = $statement['result'] ?? null;
+
+            if ( ! is_array( $result ) ) {
+                continue;
+            }
+
+            $row = $result[0] ?? $result;
+
+            if ( $row instanceof \Surreal\Cbor\Types\Record\RecordId ) {
+                return $row->toString();
+            }
+
+            if ( is_array( $row ) && isset( $row['id'] ) ) {
+                $id = $row['id'];
+
+                if ( $id instanceof \Surreal\Cbor\Types\Record\RecordId ) {
+                    return $id->toString();
+                }
+
+                if ( is_string( $id ) && str_contains( $id, ':' ) ) {
+                    return $id;
+                }
             }
         }
 
@@ -263,14 +308,14 @@ class SyncService {
 
         $q = "DELETE $surreal_record_id";
 
-        $db = apply_filters('get_surreal_db_conn', null);
+        $db = apply_filters( 'get_surreal_db_conn', null );
 
-        if ( ! ( $db instanceof \Surreal\Surreal ) ) {
-            error_log('Unable to get Surreal DB connection ' . __FUNCTION__ . ' ' . __LINE__);
+        if ( ! self::is_queryable( $db ) ) {
+            error_log( 'Unable to get Surreal DB connection ' . __FUNCTION__ . ' ' . __LINE__ );
             return false;
         }
 
-        $res = $db->query($q);
+        $db->query( $q );
 
         return true;
     }
