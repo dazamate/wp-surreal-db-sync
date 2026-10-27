@@ -15,8 +15,8 @@ use Dazamate\SurrealGraphSync\Field\NumberField;
  * Drives the real sync entrypoints (sync_post / sync_user) end-to-end against a
  * live SurrealDB, with WordPress functions mocked via Brain\Monkey. Asserts that
  * the record + its edges actually land, that the Surreal id is written back to
- * meta, and that a relation that can't be resolved aborts the whole sync without
- * persisting anything.
+ * meta, that a relation that can't be resolved is skipped with a warning while the
+ * record still saves, and that owned relations are rebuilt on every save.
  */
 class SyncServiceIntegrationTest extends IntegrationTestCase {
     /** @var array<string,mixed> captured *_meta writes */
@@ -99,11 +99,14 @@ class SyncServiceIntegrationTest extends IntegrationTestCase {
         $this->assertSame($this->meta['post:123:surreal_id'], $edges[0]['in']->toString());
     }
 
-    public function testSyncPostAbortsAndPersistsNothingWhenRelationUnresolvable(): void {
-        // Relation to an unknown WP id (999) that has no surreal_id meta — can't
-        // be resolved, so the whole sync must abort before writing anything.
+    public function testSyncPostSkipsAnUnresolvableRelationAndStillSaves(): void {
+        // Relation to an unknown WP id (999) that has no surreal_id meta can't be
+        // resolved. That edge is skipped with a warning; the record and the other
+        // edge still land.
+        $person = $this->makeRecord('person', 1);
         $relations = [
             new RelationData(123, 999, 'wrote', null, true),
+            new RelationData(123, $person, 'wrote', null, true),
         ];
         Functions\when('apply_filters')->alias(function (string $hook, $value = null) use ($relations) {
             return match ($hook) {
@@ -119,10 +122,68 @@ class SyncServiceIntegrationTest extends IntegrationTestCase {
 
         PostSyncService::sync_post($post, 'post', (new MappedData())->set('post_id', new NumberField(123)));
 
-        // No surreal id written, and the record was never created.
-        $this->assertArrayNotHasKey('post:123:surreal_id', $this->meta);
-        $posts = $this->selectRows('SELECT * FROM post WHERE post_id = 123;');
-        $this->assertCount(0, $posts);
+        $this->assertArrayHasKey('post:123:surreal_id', $this->meta);
+        $this->assertCount(1, $this->selectRows('SELECT * FROM post WHERE post_id = 123;'));
+        $this->assertCount(1, $this->selectRows('SELECT * FROM wrote;'));
+
+        $warnings = $this->meta['post:123:surreal_sync_error'] ?? [];
+        $this->assertCount(1, $warnings);
+        $this->assertStringStartsWith('Surreal sync warning:', $warnings[0]);
+    }
+
+    public function testOwnedRelationsAreRebuiltOnEverySave(): void {
+        $a = $this->makeRecord('ingredient', 1);
+        $b = $this->makeRecord('ingredient', 2);
+        $line = fn(string $to, int $pos) => new RelationData(
+            123, $to, 'uses_ingredient', (new MappedData())->set('position', new NumberField($pos)), false
+        );
+
+        $save = function (array $relations): void {
+            Functions\when('apply_filters')->alias(function (string $hook, $value = null) use ($relations) {
+                return match ($hook) {
+                    'get_surreal_db_conn'          => $this->db,
+                    'surreal_graph_map_related'    => $relations,
+                    'surreal_graph_owned_relations' => ['uses_ingredient'],
+                    default                        => $value,
+                };
+            });
+
+            $post = new \WP_Post();
+            $post->ID = 123;
+            $post->post_type = 'recipe';
+            PostSyncService::sync_post($post, 'recipe', (new MappedData())->set('post_id', new NumberField(123)));
+        };
+
+        // Three lines, two of them the same ingredient: non-unique edges keep both.
+        $save([$line($a, 0), $line($b, 1), $line($a, 2)]);
+        $this->assertCount(3, $this->selectRows('SELECT * FROM uses_ingredient;'));
+
+        // A line is removed and the rest are reordered: only the new set remains.
+        $save([$line($b, 0)]);
+        $edges = $this->selectRows('SELECT * FROM uses_ingredient;');
+        $this->assertCount(1, $edges);
+        $this->assertSame($b, $edges[0]['out']->toString());
+        $this->assertSame(0, $edges[0]['position']);
+
+        // Every line removed: no edges left.
+        $save([]);
+        $this->assertCount(0, $this->selectRows('SELECT * FROM uses_ingredient;'));
+
+        // The recipe record itself survived every save, once.
+        $this->assertCount(1, $this->selectRows('SELECT * FROM recipe WHERE post_id = 123;'));
+    }
+
+    public function testSyncUserStillAbortsWhenRelationUnresolvable(): void {
+        // Only post syncs opt in to skip-with-warning; a user sync must not drop a link silently.
+        $user = new \WP_User();
+        $user->ID = 56;
+
+        UserSyncService::sync_user($user, 'person', (new MappedData())->set('user_id', new NumberField(56)), [
+            new RelationData(56, 999, 'member_of', null, true),
+        ]);
+
+        $this->assertArrayNotHasKey('user:56:surreal_id', $this->meta);
+        $this->assertCount(0, $this->selectRows('SELECT * FROM person WHERE user_id = 56;'));
     }
 
     public function testSyncUserPersistsRecordAndWritesMeta(): void {

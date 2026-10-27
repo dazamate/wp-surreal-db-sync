@@ -2,7 +2,7 @@
 /*
  * Plugin Name:       Surreal Graph Sync
  * Description:       Convert wordpress data to a Surreal DB graph data
- * Version:           1.0.2
+ * Version:           1.1.0
  * Requires PHP:      8.5
  * Author:            Dale Woods
  * Author URI:        https://dalewoods.me
@@ -14,6 +14,7 @@ require_once plugin_dir_path( __FILE__ ) . 'vendor/autoload.php';
 use Dazamate\SurrealGraphSync\SurrealDBConnection;
 use Dazamate\SurrealGraphSync\Settings\AdminSettings;
 use Dazamate\SurrealGraphSync\Manager\PostSyncManager;
+use Dazamate\SurrealGraphSync\Manager\SurrealDataPreviewManager;
 use Dazamate\SurrealGraphSync\Manager\UserSyncManager;
 use Dazamate\SurrealGraphSync\Manager\ImageSyncManager;
 use Dazamate\SurrealGraphSync\Manager\TermSyncManager;
@@ -35,6 +36,11 @@ use Dazamate\SurrealGraphSync\Mapper\User\UserMapper;
 use Dazamate\SurrealGraphSync\Mapper\User\PersonMapper;
 
 use Dazamate\SurrealGraphSync\Mapper\Term\TermMapper;
+use Dazamate\SurrealGraphSync\Cli\SyncPostsCommand;
+
+if ( defined( 'WP_CLI' ) && WP_CLI ) {
+    SyncPostsCommand::register();
+}
 
 add_action( 'plugins_loaded', function() {
     SurrealDBConnection::init_db_connection();
@@ -49,6 +55,10 @@ add_action( 'plugins_loaded', function() {
 
     SyncService::load_hooks();
     PostSyncService::load_hooks();
+
+    // Feature flag for mappers: posts can own relation tables (surreal_graph_owned_relations),
+    // whose edges are rebuilt on every save. Mappers check this before relying on it.
+    add_filter( 'surreal_graph_supports_owned_relations', '__return_true' );
     UserSyncService::load_hooks();
     TermSyncService::load_hooks();
 
@@ -66,6 +76,7 @@ add_action('init', function () {
     TermErrorManager::load_hooks();
 
     PostSyncManager::load_hooks();
+    SurrealDataPreviewManager::load_hooks();
     UserSyncManager::load_hooks();
     ImageSyncManager::load_hooks();
     TermSyncManager::load_hooks();

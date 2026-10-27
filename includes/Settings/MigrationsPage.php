@@ -11,30 +11,41 @@ class MigrationsPage {
     // there's no load_hooks() here.
 
     static private function get_previous_migrations(array $group_names): array {
+        $last_migrations = array_fill_keys($group_names, 0);
+
         $db = apply_filters('get_surreal_db_conn', null);
 
-        if ( ! ( $db instanceof \Surreal\Surreal ) ) {
+        if ( ! is_object( $db ) || ! method_exists( $db, 'query' ) ) {
             error_log('Unable to get Surreal DB connection ' . __FUNCTION__ . ' ' . __LINE__);
+            return $last_migrations;
         }
 
-        $q = sprintf("SELECT * FROM migration:state");
+        try {
+            $res = $db->query('SELECT * FROM migration:state');
+        } catch (\Throwable $e) {
+            error_log('Surreal migration state query failed: ' . $e->getMessage());
+            return $last_migrations;
+        }
 
-        $res = $db->query($q); 
-        
-        $last_migarations = array_reduce($group_names, function($carry = [], $group_name = '') {
-            $carry[$group_name] = 0;
-            return $carry;
-        });
+        // Fresh DB / missing table: SDK returns [ "The table 'migration' does not exist" ]
+        // Success shape: [ [ [ 'id' => ..., '<group>' => [...] ] ] ]
+        $row = $res[0][0] ?? null;
 
-        foreach ($res[0][0] ?? [] as $k => $v) {
-            if ($k === 'id') continue;
+        if (!is_array($row)) {
+            return $last_migrations;
+        }
+
+        foreach ($row as $k => $v) {
+            if ($k === 'id' || !is_array($v)) {
+                continue;
+            }
 
             if (($v['last_migration_time'] ?? null) instanceof \DateTime) {
-                $last_migarations[$k] = $v['last_migration_time']->getTimeStamp();
+                $last_migrations[$k] = $v['last_migration_time']->getTimestamp();
             }
         }
 
-        return $last_migarations;
+        return $last_migrations;
     }
 
     static public function render() {
@@ -204,7 +215,7 @@ class MigrationsPage {
     protected static function run_queries(array $queries): void {
         $db = apply_filters('get_surreal_db_conn', null);
 
-        if ( ! ( $db instanceof \Surreal\Surreal ) ) {
+        if ( ! is_object( $db ) || ! method_exists( $db, 'query' ) ) {
             add_settings_error('migration', 'no_db_conn', 'Unable to get a Surreal DB connection to run the migration.', 'error');
             return;
         }

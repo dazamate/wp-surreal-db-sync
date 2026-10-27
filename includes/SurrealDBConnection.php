@@ -2,12 +2,13 @@
 
 namespace Dazamate\SurrealGraphSync;
 
+use Dazamate\SurrealGraphSync\Client\SurrealClientInterface;
+use Dazamate\SurrealGraphSync\Client\SurrealHttpClient;
 use Dazamate\SurrealGraphSync\Settings\AdminSettings;
-use Surreal\Surreal;
 
 class SurrealDBConnection {
     static private bool $_connetion = false;
-    static private Surreal $_db;
+    static private SurrealClientInterface $_db;
 
     static public function has_db_conn(): bool {
         return self::$_connetion;
@@ -85,36 +86,52 @@ class SurrealDBConnection {
 
     static public function init_db_connection(): bool {
         $settings = AdminSettings::get_settings();
-        $db = new Surreal();
-    
+
+        // JSON/HTTP client — avoids the SDK's CBOR float16 crash on PHP 8+.
+        $protocol = in_array( $settings['db_protocol'], [ 'http', 'https' ], true )
+            ? $settings['db_protocol']
+            : 'http';
+
+        $base_url = sprintf(
+            '%s://%s:%s',
+            $protocol,
+            $settings['db_address'],
+            $settings['db_port']
+        );
+
         try {
-            $db->connect($settings['db_protocol'] . '://' . $settings['db_address'] . ':' . $settings['db_port'], [
-                "namespace"     => $settings['db_namespace'],
-                "database"      => $settings['db_name']
-            ]);
+            $db = new SurrealHttpClient(
+                $base_url,
+                (string) $settings['db_namespace'],
+                (string) $settings['db_name']
+            );
 
-            $db->signin([
-                "user"      => $settings['db_username'],
-                "pass"      => $settings['db_password'],
-                "namespace" => $settings['db_namespace'],
-            ]);
+            // System root must sign in without NS scope (NS would look up a
+            // namespace-level user). Non-root (prod NS users) keep namespace.
+            $signin = [
+                'user' => $settings['db_username'],
+                'pass' => $settings['db_password'],
+            ];
+            if ( strtolower( (string) $settings['db_username'] ) !== 'root' ) {
+                $signin['namespace'] = $settings['db_namespace'];
+            }
+            $db->signin( $signin );
+            $db->use( (string) $settings['db_namespace'], (string) $settings['db_name'] );
 
-            $db->use([
-                "namespace" => $settings['db_namespace'],
-                "database"  => $settings['db_name'],
-            ]);
+            // Cheap connectivity check.
+            $db->query( 'INFO FOR DB;' );
 
-            self::$_db = $db;
+            self::$_db        = $db;
             self::$_connetion = true;
-        } catch(\Throwable $e) {
-            error_log($e->getMessage());
+        } catch ( \Throwable $e ) {
+            error_log( $e->getMessage() );
             return false;
         }
 
         return true;
     }
 
-    static public function get_surreal_db_conn(): ?\Surreal\Surreal {
-        return self::$_db;
+    static public function get_surreal_db_conn(): ?SurrealClientInterface {
+        return self::$_connetion ? self::$_db : null;
     }
 }

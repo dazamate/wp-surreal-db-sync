@@ -2,6 +2,7 @@
 
 namespace Dazamate\SurrealGraphSync\Service;
 
+use Dazamate\SurrealGraphSync\Client\SurrealClientInterface;
 use Dazamate\SurrealGraphSync\Query\QueryBuilder;
 use Dazamate\SurrealGraphSync\Data\MappedData;
 use Dazamate\SurrealGraphSync\Data\RelationData;
@@ -18,16 +19,28 @@ class SyncService {
         add_action('surreal_delete_record', [__CLASS__, 'delete_record']);
     }
 
-    protected static function get_surreal_db_conn(array &$errors): ?\Surreal\Surreal {
-        $db = apply_filters('get_surreal_db_conn', null);
+    /**
+     * @return SurrealClientInterface|\Surreal\Surreal|null
+     */
+    protected static function get_surreal_db_conn( array &$errors ): ?object {
+        $db = apply_filters( 'get_surreal_db_conn', null );
 
-        if ( ! ( $db instanceof \Surreal\Surreal ) ) {
+        if ( ! self::is_queryable( $db ) ) {
             $errors[] = 'Surreal sync error: Unable to establish database connection';
-            error_log('Unable to get Surreal DB connection ' . __FUNCTION__ . ' ' . __LINE__);
-            return NULL;
+            error_log( 'Unable to get Surreal DB connection ' . __FUNCTION__ . ' ' . __LINE__ );
+            return null;
         }
 
         return $db;
+    }
+
+    /**
+     * Duck-type check so integration tests can still inject the official SDK.
+     */
+    private static function is_queryable( mixed $db ): bool {
+        return is_object( $db )
+            && method_exists( $db, 'query' )
+            && method_exists( $db, 'queryRaw' );
     }
 
     protected static function try_get_record_id_from_response(array $res): ?string {
@@ -42,19 +55,38 @@ class SyncService {
     // transaction — either everything commits or nothing is written. $subject is the WP
     // record being saved; its id and type drive the WHERE match and the resolution of any
     // relation endpoint that points back at this record (rendered as the `$rec` variable).
+    //
+    // $owned_relations are relation tables whose edges out of this record are rebuilt from
+    // scratch on every save (see QueryBuilder::build_sync_transaction). When the caller passes
+    // $warnings, a relation whose other end isn't in Surreal yet is skipped and reported there
+    // instead of failing the save. Callers that don't (term and user syncs) keep failing, so
+    // nothing is dropped without a message.
+    /**
+     * @param SurrealClientInterface|\Surreal\Surreal $db
+     * @param list<string> $owned_relations
+     */
     protected static function persist_entity(
-        \Surreal\Surreal $db,
+        object $db,
         string $table,
         MappedData $entity_data,
         array $raw_related_mappings,
         WordPressId $subject,
-        array &$errors
+        array &$errors,
+        array $owned_relations = [],
+        ?array &$warnings = null
     ): ?string {
         $query_type = $subject->type;
         $self_wp_id = $subject->id;
         $where_clause = sprintf('%s_id = %d', $query_type->value, $self_wp_id);
 
-        $resolved_relations = self::validate_relation_mapping($raw_related_mappings, $query_type, $errors, $self_wp_id);
+        foreach ($owned_relations as $relation_table) {
+            if (!is_string($relation_table) || !QueryBuilder::is_valid_table_name($relation_table)) {
+                $errors[] = sprintf('Surreal sync error: invalid owned relation table name %s', var_export($relation_table, true));
+                return null;
+            }
+        }
+
+        $resolved_relations = self::validate_relation_mapping($raw_related_mappings, $query_type, $errors, $self_wp_id, $warnings);
 
         if ($resolved_relations === false) {
             return null;
@@ -71,7 +103,7 @@ class SyncService {
             $resolved_relations
         );
 
-        $q = QueryBuilder::build_sync_transaction($table, $where_clause, $entity_data, $relation_queries);
+        $q = QueryBuilder::build_sync_transaction($table, $where_clause, $entity_data, $relation_queries, $owned_relations);
 
         try {
             $res = $db->queryRaw($q);
@@ -134,22 +166,51 @@ class SyncService {
 
     // The transaction ends with `RETURN $rec`. SurrealDB v2 may collapse the
     // response to a single statement; v3 returns every statement (BEGIN/LET/
-    // RETURN/COMMIT), so scan for the first record id rather than assuming
-    // index 0.
-    protected static function record_id_from_transaction(?array $res): ?string {
-        if (!is_array($res)) {
+    // RELATE/RETURN/COMMIT). RELATE rows also contain an `id`, so we must not
+    // take the first id we see — prefer a bare record-id result (the RETURN),
+    // scanning from the end.
+    protected static function record_id_from_transaction( ?array $res ): ?string {
+        if ( ! is_array( $res ) ) {
             return null;
         }
 
-        foreach ($res as $statement) {
-            $result = $statement['result'] ?? null;
+        // 1) Bare record id string / RecordId (RETURN $rec) — walk backwards.
+        for ( $i = count( $res ) - 1; $i >= 0; $i-- ) {
+            $result = $res[ $i ]['result'] ?? null;
 
-            if ($result instanceof \Surreal\Cbor\Types\Record\RecordId) {
+            if ( $result instanceof \Surreal\Cbor\Types\Record\RecordId ) {
                 return $result->toString();
             }
 
-            if (is_string($result) && $result !== '') {
+            if ( is_string( $result ) && $result !== '' && str_contains( $result, ':' ) ) {
                 return $result;
+            }
+        }
+
+        // 2) Fallback: UPSERT ... RETURN id → [ { id: ... } ] / [ RecordId ]
+        foreach ( $res as $statement ) {
+            $result = $statement['result'] ?? null;
+
+            if ( ! is_array( $result ) ) {
+                continue;
+            }
+
+            $row = $result[0] ?? $result;
+
+            if ( $row instanceof \Surreal\Cbor\Types\Record\RecordId ) {
+                return $row->toString();
+            }
+
+            if ( is_array( $row ) && isset( $row['id'] ) ) {
+                $id = $row['id'];
+
+                if ( $id instanceof \Surreal\Cbor\Types\Record\RecordId ) {
+                    return $id->toString();
+                }
+
+                if ( is_string( $id ) && str_contains( $id, ':' ) ) {
+                    return $id;
+                }
             }
         }
 
@@ -174,7 +235,13 @@ class SyncService {
     // then resolve its endpoints to Surreal record ids. When $self_wp_id is given, an endpoint
     // matching it resolves to the in-transaction `$rec` so a record can relate to itself before
     // its id has been persisted. Returns resolved RelationData, or false on the first failure.
-    public static function validate_relation_mapping(array $related_data_mappings, QueryType $query_type, array &$errors, ?int $self_wp_id = null): array|false {
+    //
+    // When $warnings is given, an endpoint that can't be resolved (usually a related post that
+    // hasn't been synced yet) skips that one relation and adds a warning instead of failing.
+    // An invalid RelationData still fails: that's a mapping bug, not missing data.
+    public static function validate_relation_mapping(array $related_data_mappings, QueryType $query_type, array &$errors, ?int $self_wp_id = null, ?array &$warnings = null): array|false {
+        $skip_unresolved = $warnings !== null;
+
         $resolved = [];
 
         foreach ($related_data_mappings as $relation) {
@@ -198,16 +265,17 @@ class SyncService {
             // and a reference to the record being saved becomes the `$rec`
             // transaction variable.
             $from_record = self::resolve_endpoint((string) $relation->from_record, $query_type, $self_wp_id);
+            $to_record   = empty($from_record) ? null : self::resolve_endpoint((string) $relation->to_record, $query_type, $self_wp_id);
 
-            if (empty($from_record)) {
-                $errors[] = self::endpoint_error('from_record', $relation);
-                return false;
-            }
+            if (empty($from_record) || empty($to_record)) {
+                $message = self::endpoint_error(empty($from_record) ? 'from_record' : 'to_record', $relation);
 
-            $to_record = self::resolve_endpoint((string) $relation->to_record, $query_type, $self_wp_id);
+                if ($skip_unresolved) {
+                    $warnings[] = sprintf('Surreal sync warning: %s. That link was left out; the rest was saved.', $message);
+                    continue;
+                }
 
-            if (empty($to_record)) {
-                $errors[] = self::endpoint_error('to_record', $relation);
+                $errors[] = $message;
                 return false;
             }
 
@@ -263,14 +331,14 @@ class SyncService {
 
         $q = "DELETE $surreal_record_id";
 
-        $db = apply_filters('get_surreal_db_conn', null);
+        $db = apply_filters( 'get_surreal_db_conn', null );
 
-        if ( ! ( $db instanceof \Surreal\Surreal ) ) {
-            error_log('Unable to get Surreal DB connection ' . __FUNCTION__ . ' ' . __LINE__);
+        if ( ! self::is_queryable( $db ) ) {
+            error_log( 'Unable to get Surreal DB connection ' . __FUNCTION__ . ' ' . __LINE__ );
             return false;
         }
 
-        $res = $db->query($q);
+        $db->query( $q );
 
         return true;
     }

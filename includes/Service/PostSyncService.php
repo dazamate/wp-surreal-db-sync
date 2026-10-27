@@ -52,15 +52,23 @@ class PostSyncService extends SyncService {
         // record via the `$rec` variable).
         $mapped_related_data = apply_filters('surreal_graph_map_related', [], $post);
 
+        // Relation tables this post owns: its outgoing edges there are deleted and rebuilt
+        // from $mapped_related_data on every save.
+        $owned_relations = apply_filters('surreal_graph_owned_relations', [], $post);
+        $owned_relations = is_array($owned_relations) ? array_values($owned_relations) : [];
+
         // Upsert the record and all of its edges atomically — either everything
         // commits or nothing does.
+        $warnings = [];
         $surreal_id = self::persist_entity(
             $db,
             $mapped_table_name,
             $mapped_entity_data,
             $mapped_related_data,
             new WordPressId($post->ID, QueryType::POST),
-            $errors
+            $errors,
+            $owned_relations,
+            $warnings
         );
 
         if ($surreal_id === null) {
@@ -69,5 +77,9 @@ class PostSyncService extends SyncService {
         }
 
         update_post_meta($post->ID, MetaKeys::SURREAL_DB_RECORD_ID_META_KEY->value, $surreal_id);
+
+        if (!empty($warnings)) {
+            ErrorManager::add($post->ID, $warnings);
+        }
     }
 }
